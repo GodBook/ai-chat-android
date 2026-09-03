@@ -377,6 +377,7 @@ class MainViewModel(
         apiKey: String,
         visionEnabled: Boolean,
         updateManifestUrl: String? = null,
+        backgroundCaptureEnabled: Boolean = false,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -384,6 +385,9 @@ class MainViewModel(
             return Result.failure(IllegalArgumentException("接口地址必须是有效的 HTTPS 地址"))
         }
         if (model.trim().isBlank()) return Result.failure(IllegalArgumentException("模型名称不能为空"))
+        if (backgroundCaptureEnabled && !visionEnabled) {
+            return Result.failure(IllegalArgumentException("后台截图问答需要开启图片支持"))
+        }
         val normalizedUpdateUrl = (updateManifestUrl ?: updateConfigStore.readManifestUrl()).trim()
         if (normalizedUpdateUrl.isNotEmpty()) {
             runCatching { UpdateManifestParser.validateHttpsUrl(normalizedUpdateUrl) }
@@ -391,7 +395,12 @@ class MainViewModel(
         }
         return runCatching {
             if (apiKey.isNotBlank()) apiKeyStore.save(apiKey.trim())
-            configStore.update(normalizedUrl, model.trim(), visionEnabled)
+            configStore.update(
+                baseUrl = normalizedUrl,
+                model = model.trim(),
+                visionEnabled = visionEnabled,
+                backgroundCaptureEnabled = backgroundCaptureEnabled,
+            )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
         }

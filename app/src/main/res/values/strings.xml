@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AI 聊天</string>
+    <string name="volume_screenshot_accessibility_description">监听音量下键以触发后台截屏问答</string>
 </resources>

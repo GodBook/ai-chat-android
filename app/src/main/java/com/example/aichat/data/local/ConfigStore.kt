@@ -25,6 +25,7 @@ class ConfigStore(context: Context) {
             baseUrl = preferences[BASE_URL] ?: DEFAULT_BASE_URL,
             model = preferences[MODEL] ?: DEFAULT_MODEL,
             visionEnabled = preferences[VISION_ENABLED] ?: true,
+            backgroundCaptureEnabled = preferences[BACKGROUND_CAPTURE_ENABLED] ?: false,
         )
     }
 
@@ -34,11 +35,13 @@ class ConfigStore(context: Context) {
         baseUrl: String,
         model: String,
         visionEnabled: Boolean,
+        backgroundCaptureEnabled: Boolean = false,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
             preferences[MODEL] = model.trim()
             preferences[VISION_ENABLED] = visionEnabled
+            preferences[BACKGROUND_CAPTURE_ENABLED] = backgroundCaptureEnabled
         }
     }
 
@@ -46,6 +49,7 @@ class ConfigStore(context: Context) {
         baseUrl = config.baseUrl,
         model = config.model,
         visionEnabled = config.visionEnabled,
+        backgroundCaptureEnabled = config.backgroundCaptureEnabled,
     )
 
     suspend fun reset() {
@@ -58,5 +62,6 @@ class ConfigStore(context: Context) {
         val BASE_URL = stringPreferencesKey("base_url")
         val MODEL = stringPreferencesKey("model")
         val VISION_ENABLED = booleanPreferencesKey("vision_enabled")
+        val BACKGROUND_CAPTURE_ENABLED = booleanPreferencesKey("background_capture_enabled")
     }
 }

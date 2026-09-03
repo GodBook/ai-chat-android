@@ -1,6 +1,7 @@
 package com.example.aichat.ui
 
 import android.content.ActivityNotFoundException
+import android.app.Activity
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -125,6 +126,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
+import com.example.aichat.background.BackgroundScreenshotManager
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.MessageRole
@@ -144,6 +146,15 @@ fun AiChatApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val projectionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            BackgroundScreenshotManager.start(context, result.resultCode, data)
+        }
+    }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -205,6 +216,11 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onDownloadUpdate = viewModel::downloadUpdate,
                     onPrepareUpdate = viewModel::prepareUpdateInstall,
                     onDismissUpdate = viewModel::dismissUpdate,
+                    onRequestProjection = {
+                        projectionLauncher.launch(BackgroundScreenshotManager.projectionPermissionIntent(context))
+                    },
+                    onOpenOverlaySettings = { BackgroundScreenshotManager.openOverlaySettings(context) },
+                    onOpenAccessibilitySettings = { BackgroundScreenshotManager.openAccessibilitySettings(context) },
                 )
             }
         }
@@ -925,17 +941,23 @@ private fun MarkdownTable(table: MarkdownBlockModel.Table) {
 private fun SettingsScreen(
     state: MainUiState,
     onBack: () -> Unit,
-    onSave: suspend (String, String, String, Boolean, String) -> Result<Unit>,
+    onSave: suspend (String, String, String, Boolean, String, Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
     onPrepareUpdate: () -> InstallPreparation?,
     onDismissUpdate: () -> Unit,
+    onRequestProjection: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
 ) {
     var baseUrl by rememberSaveable(state.config.baseUrl) { mutableStateOf(state.config.baseUrl) }
     var model by rememberSaveable(state.config.model) { mutableStateOf(state.config.model) }
     var apiKey by rememberSaveable { mutableStateOf("") }
     var visionEnabled by rememberSaveable(state.config.visionEnabled) { mutableStateOf(state.config.visionEnabled) }
+    var backgroundCaptureEnabled by rememberSaveable(state.config.backgroundCaptureEnabled) {
+        mutableStateOf(state.config.backgroundCaptureEnabled)
+    }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -1039,6 +1061,56 @@ private fun SettingsScreen(
                 }
                 Switch(checked = visionEnabled, onCheckedChange = { visionEnabled = it; saved = false })
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("音量下键后台截图问答", fontWeight = FontWeight.Medium)
+                    Text(
+                        "开启后，应用在后台运行时按下音量下键会截取屏幕并发送给 AI；需要同时开启支持图片",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = backgroundCaptureEnabled,
+                    onCheckedChange = { backgroundCaptureEnabled = it; saved = false },
+                )
+            }
+            if (backgroundCaptureEnabled) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "首次使用请授予屏幕捕获、悬浮窗和音量监听权限",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onRequestProjection,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("授权屏幕捕获")
+                        }
+                        OutlinedButton(
+                            onClick = onOpenOverlaySettings,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("开启悬浮窗")
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onOpenAccessibilitySettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("开启音量监听")
+                    }
+                }
+            }
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                 shape = RoundedCornerShape(8.dp),
@@ -1093,7 +1165,14 @@ private fun SettingsScreen(
                         saving = true
                         scope.launch {
                             try {
-                                onSave(baseUrl, model, apiKey, visionEnabled, updateManifestUrl)
+                                onSave(
+                                    baseUrl,
+                                    model,
+                                    apiKey,
+                                    visionEnabled,
+                                    updateManifestUrl,
+                                    backgroundCaptureEnabled,
+                                )
                                     .onSuccess { error = null; saved = true; apiKey = "" }
                                     .onFailure { error = it.message ?: "保存失败"; saved = false }
                             } finally {

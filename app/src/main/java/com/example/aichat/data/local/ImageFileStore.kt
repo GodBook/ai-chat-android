@@ -1,6 +1,7 @@
 package com.example.aichat.data.local
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -34,6 +35,23 @@ class ImageFileStore(private val context: Context) : ImageStore {
         val file = File(path)
         if (file.parentFile?.canonicalFile == File(context.filesDir, IMAGE_DIRECTORY).canonicalFile) {
             file.delete()
+        }
+    }
+
+    /** Persists a screenshot in the same private directory used by chat attachments. */
+    suspend fun saveScreenshot(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
+        val directory = File(context.filesDir, IMAGE_DIRECTORY).apply { mkdirs() }
+        val destination = File(directory, "${UUID.randomUUID()}.jpg")
+        try {
+            destination.outputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) {
+                    "无法保存屏幕截图"
+                }
+            }
+            destination.absolutePath
+        } catch (failure: Throwable) {
+            destination.delete()
+            throw failure
         }
     }
 

@@ -33,6 +33,8 @@ data class ProviderConfig(
     val model: String = "gpt-4o-mini",
     val apiKey: String? = null,
     val visionEnabled: Boolean = true,
+    /** Enables the background volume-down screenshot question flow. */
+    val backgroundCaptureEnabled: Boolean = false,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */
