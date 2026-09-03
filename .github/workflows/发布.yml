@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon --stacktrace -PUPDATE_MANIFEST_URL="$UPDATE_MANIFEST_URL"
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleRelease --no-daemon --stacktrace -PUPDATE_MANIFEST_URL="$UPDATE_MANIFEST_URL"
 
       - name: 用固定签名证书签名并生成更新清单
         shell: bash
@@ -77,7 +77,9 @@ jobs:
             release_tag="$expected_tag"
           fi
           apk_name="ai-chat-android-$version_name.apk"
-          "$apksigner" sign --ks signing.keystore --ks-key-alias "$KEY_ALIAS" --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" --out "dist/$apk_name" app/build/outputs/apk/debug/app-debug.apk
+          unsigned_apk="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -f "$unsigned_apk"
+          "$apksigner" sign --ks signing.keystore --ks-key-alias "$KEY_ALIAS" --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" --out "dist/$apk_name" "$unsigned_apk"
           "$apksigner" verify --verbose "dist/$apk_name"
           sha256="$(sha256sum "dist/$apk_name" | cut -d ' ' -f 1)"
           jq -n --argjson versionCode "$version_code" --arg versionName "$version_name" --arg downloadUrl "https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag/$apk_name" --arg sha256 "$sha256" --arg releaseNotes "${RELEASE_NOTES_INPUT:-自动构建发布}" '{versionCode: $versionCode, versionName: $versionName, downloadUrl: $downloadUrl, sha256: $sha256, releaseNotes: $releaseNotes}' > dist/latest.json
