@@ -60,11 +60,11 @@
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2.0`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.2
-git push origin v1.2
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -84,7 +84,7 @@ git push origin v1.2
 {
   "versionCode": 3,
   "versionName": "1.2.0",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2/ai-chat-android-1.2.apk",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2.0/ai-chat-android-1.2.0.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "releaseNotes": "新增功能并修复稳定性问题"
 }
