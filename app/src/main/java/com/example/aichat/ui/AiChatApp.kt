@@ -136,6 +136,8 @@ import coil3.compose.AsyncImage
 import com.example.aichat.background.BackgroundScreenshotManager
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
+import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.update.InstallPreparation
@@ -226,7 +228,15 @@ fun AiChatApp(viewModel: MainViewModel) {
                 SettingsScreen(
                     state = state,
                     onBack = { navController.popBackStack() },
-                    onSave = { baseUrl, model, apiKey, visionEnabled, updateUrl, backgroundEnabled ->
+                    onSave = {
+                            baseUrl,
+                            model,
+                            apiKey,
+                            visionEnabled,
+                            updateUrl,
+                            backgroundEnabled,
+                            screenshotPrompt,
+                        ->
                         viewModel.saveConfig(
                             baseUrl = baseUrl,
                             model = model,
@@ -234,6 +244,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             visionEnabled = visionEnabled,
                             updateManifestUrl = updateUrl,
                             backgroundCaptureEnabled = backgroundEnabled,
+                            screenshotPrompt = screenshotPrompt,
                         ).also { result ->
                             if (result.isSuccess) {
                                 if (backgroundEnabled) {
@@ -999,7 +1010,7 @@ private fun MarkdownTable(table: MarkdownBlockModel.Table) {
 private fun SettingsScreen(
     state: MainUiState,
     onBack: () -> Unit,
-    onSave: suspend (String, String, String, Boolean, String, Boolean) -> Result<Unit>,
+    onSave: suspend (String, String, String, Boolean, String, Boolean, String) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
@@ -1017,6 +1028,9 @@ private fun SettingsScreen(
     var visionEnabled by rememberSaveable(state.config.visionEnabled) { mutableStateOf(state.config.visionEnabled) }
     var backgroundCaptureEnabled by rememberSaveable(state.config.backgroundCaptureEnabled) {
         mutableStateOf(state.config.backgroundCaptureEnabled)
+    }
+    var screenshotPrompt by rememberSaveable(state.config.screenshotPrompt) {
+        mutableStateOf(state.config.screenshotPrompt)
     }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
@@ -1186,6 +1200,35 @@ private fun SettingsScreen(
             }
             if (backgroundCaptureEnabled) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = screenshotPrompt,
+                        onValueChange = {
+                            screenshotPrompt = it.take(MAX_SCREENSHOT_PROMPT_LENGTH)
+                            saved = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("截图后发送给 AI 的提示词") },
+                        supportingText = {
+                            Text("${screenshotPrompt.length}/$MAX_SCREENSHOT_PROMPT_LENGTH")
+                        },
+                        isError = screenshotPrompt.isBlank(),
+                        minLines = 3,
+                        maxLines = 6,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                screenshotPrompt = DEFAULT_SCREENSHOT_PROMPT
+                                saved = false
+                            },
+                            enabled = screenshotPrompt != DEFAULT_SCREENSHOT_PROMPT,
+                        ) {
+                            Text("恢复默认提示词")
+                        }
+                    }
                     Text(
                         if (usesAccessibilityScreenshot) {
                             "开关会立即保存，只会由你手动关闭。请开启悬浮窗和音量监听，并在系统无障碍设置中选择“AI 聊天”。Android 11 及以上由无障碍服务直接截图，不需要单独授权屏幕录制。"
@@ -1309,6 +1352,7 @@ private fun SettingsScreen(
                                     visionEnabled,
                                     updateManifestUrl,
                                     backgroundCaptureEnabled,
+                                    screenshotPrompt,
                                 )
                                     .onSuccess { error = null; saved = true; apiKey = "" }
                                     .onFailure { error = it.message ?: "保存失败"; saved = false }

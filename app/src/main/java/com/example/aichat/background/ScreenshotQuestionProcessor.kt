@@ -2,6 +2,7 @@ package com.example.aichat.background
 
 import android.graphics.Bitmap
 import com.example.aichat.AiChatApplication
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.network.ChatClientException
 import kotlinx.coroutines.CancellationException
@@ -9,7 +10,7 @@ import kotlinx.coroutines.flow.first
 
 /** Saves a captured bitmap, sends it in a new chat, and returns the completed answer. */
 class ScreenshotQuestionProcessor(private val app: AiChatApplication) {
-    suspend fun process(bitmap: Bitmap): String {
+    suspend fun process(bitmap: Bitmap, prompt: String): String {
         var imagePath: String? = null
         var requestWasPersisted = false
         var sendStarted = false
@@ -21,11 +22,12 @@ class ScreenshotQuestionProcessor(private val app: AiChatApplication) {
             }
             imagePath = savedImagePath
             val conversation = app.container.chatRepository.createConversation("截屏问答")
+            val question = prompt.trim().ifEmpty { DEFAULT_SCREENSHOT_PROMPT }
             sendStarted = true
             val assistantId = try {
                 app.container.chatRepository.sendMessage(
                     conversation.id,
-                    SCREENSHOT_PROMPT,
+                    question,
                     listOf(savedImagePath),
                 )
             } catch (failure: ChatClientException) {
@@ -57,10 +59,5 @@ class ScreenshotQuestionProcessor(private val app: AiChatApplication) {
             }
             throw failure
         }
-    }
-
-    private companion object {
-        const val SCREENSHOT_PROMPT =
-            "请分析这张屏幕截图，概括当前屏幕内容并直接回答用户可能需要了解的问题。请使用简洁、清晰的中文。"
     }
 }

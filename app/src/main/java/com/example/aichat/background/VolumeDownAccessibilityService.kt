@@ -155,7 +155,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
                 return@launch
             }
             try {
-                val answer = questionProcessor.process(bitmap)
+                val answer = questionProcessor.process(bitmap, config.screenshotPrompt)
                 showFeedback(answer)
             } catch (cancelled: CancellationException) {
                 throw cancelled

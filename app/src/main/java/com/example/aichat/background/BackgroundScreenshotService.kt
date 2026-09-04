@@ -132,7 +132,7 @@ class BackgroundScreenshotService : Service() {
             if (!config.backgroundCaptureEnabled) return@launch
             try {
                 val bitmap = captureManager.capture()
-                val answer = questionProcessor.process(bitmap)
+                val answer = questionProcessor.process(bitmap, config.screenshotPrompt)
                 if (!overlayManager.show(answer)) notifyStatus(answer)
             } catch (cancelled: CancellationException) {
                 throw cancelled

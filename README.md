@@ -11,7 +11,8 @@
 - 渲染标题、段落、粗体、斜体、行内代码、链接、列表、引用、GFM 表格与代码块
 - 长按 AI 回复，使用 Android 系统选文工具精确选择文字
 - 从系统相册选图，以 Base64 data URL 发送给支持视觉输入的模型
-- 可选开启后台音量下键截屏问答：截取当前屏幕、创建独立会话发送给 AI，并在屏幕顶部显示回答
+- 可选开启后台音量下键截屏问答：截取当前屏幕、创建独立会话发送给 AI，并用类似 QQ 消息通知的浅蓝横幅在屏幕顶部显示回答
+- 可自定义截图随附的 AI 提示词，并可一键恢复默认提示词
 - 通过 HTTPS 更新清单检查、下载并安装新版 APK
 - 使用 Room 保存聊天记录，DataStore 保存普通设置，Android Keystore 加密 API Key
 
@@ -23,6 +24,8 @@
 4. 输入文字或选择图片后发送。生成期间可点击停止按钮，失败或中断的回复可手动重试。
 
 在“设置”中开启“音量下键后台截图问答”后，开关会立即保存，进入后台或重新打开应用不会将其关闭，只有用户手动关闭开关才会停用功能。Android 11 及以上需要开启悬浮窗和音量监听（无障碍服务），截图由无障碍服务直接完成；Android 10 还需要单独授予屏幕捕获权限。授权完成后，即使应用退到后台，按音量下键也会创建一个“截屏问答”会话并显示 AI 回答。
+
+默认截图提示词为：“回答这张图片里的题目，先告诉我答案，然后再给出简短的解析。如果没有题目，就只回复没有识别到题目”。可在后台截图设置区域直接修改，保存设置后生效；“恢复默认提示词”可随时还原。
 
 设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI 聊天”无障碍服务仍为开启状态。
 
@@ -65,11 +68,11 @@
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2.1`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2.2`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.2.1
-git push origin v1.2.1
+git tag v1.2.2
+git push origin v1.2.2
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -87,11 +90,11 @@ git push origin v1.2.1
 
 ```json
 {
-  "versionCode": 4,
-  "versionName": "1.2.1",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2.1/ai-chat-android-1.2.1.apk",
+  "versionCode": 5,
+  "versionName": "1.2.2",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2.2/ai-chat-android-1.2.2.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "releaseNotes": "修复后台截图开关与音量下键截图"
+  "releaseNotes": "优化悬浮回答样式并支持自定义截图提示词"
 }
 ```
 

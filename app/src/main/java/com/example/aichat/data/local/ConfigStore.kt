@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.ProviderConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -26,6 +27,7 @@ class ConfigStore(context: Context) {
             model = preferences[MODEL] ?: DEFAULT_MODEL,
             visionEnabled = preferences[VISION_ENABLED] ?: true,
             backgroundCaptureEnabled = preferences[BACKGROUND_CAPTURE_ENABLED] ?: false,
+            screenshotPrompt = preferences[SCREENSHOT_PROMPT] ?: DEFAULT_SCREENSHOT_PROMPT,
         )
     }
 
@@ -36,12 +38,14 @@ class ConfigStore(context: Context) {
         model: String,
         visionEnabled: Boolean,
         backgroundCaptureEnabled: Boolean = false,
+        screenshotPrompt: String = DEFAULT_SCREENSHOT_PROMPT,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
             preferences[MODEL] = model.trim()
             preferences[VISION_ENABLED] = visionEnabled
             preferences[BACKGROUND_CAPTURE_ENABLED] = backgroundCaptureEnabled
+            preferences[SCREENSHOT_PROMPT] = screenshotPrompt.trim()
         }
     }
 
@@ -50,6 +54,7 @@ class ConfigStore(context: Context) {
         model = config.model,
         visionEnabled = config.visionEnabled,
         backgroundCaptureEnabled = config.backgroundCaptureEnabled,
+        screenshotPrompt = config.screenshotPrompt,
     )
 
     suspend fun reset() {
@@ -63,5 +68,6 @@ class ConfigStore(context: Context) {
         val MODEL = stringPreferencesKey("model")
         val VISION_ENABLED = booleanPreferencesKey("vision_enabled")
         val BACKGROUND_CAPTURE_ENABLED = booleanPreferencesKey("background_capture_enabled")
+        val SCREENSHOT_PROMPT = stringPreferencesKey("screenshot_prompt")
     }
 }

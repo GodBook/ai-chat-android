@@ -12,6 +12,7 @@ import com.example.aichat.data.local.ImageFileStore
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
+import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.model.ProviderConfig
@@ -378,6 +379,7 @@ class MainViewModel(
         visionEnabled: Boolean,
         updateManifestUrl: String? = null,
         backgroundCaptureEnabled: Boolean,
+        screenshotPrompt: String,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -387,6 +389,15 @@ class MainViewModel(
         if (model.trim().isBlank()) return Result.failure(IllegalArgumentException("模型名称不能为空"))
         if (backgroundCaptureEnabled && !visionEnabled) {
             return Result.failure(IllegalArgumentException("后台截图问答需要开启图片支持"))
+        }
+        val normalizedScreenshotPrompt = screenshotPrompt.trim()
+        if (normalizedScreenshotPrompt.isEmpty()) {
+            return Result.failure(IllegalArgumentException("截图问答提示词不能为空"))
+        }
+        if (normalizedScreenshotPrompt.length > MAX_SCREENSHOT_PROMPT_LENGTH) {
+            return Result.failure(
+                IllegalArgumentException("截图问答提示词不能超过 $MAX_SCREENSHOT_PROMPT_LENGTH 个字符"),
+            )
         }
         val normalizedUpdateUrl = (updateManifestUrl ?: updateConfigStore.readManifestUrl()).trim()
         if (normalizedUpdateUrl.isNotEmpty()) {
@@ -400,6 +411,7 @@ class MainViewModel(
                 model = model.trim(),
                 visionEnabled = visionEnabled,
                 backgroundCaptureEnabled = backgroundCaptureEnabled,
+                screenshotPrompt = normalizedScreenshotPrompt,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
@@ -412,7 +424,7 @@ class MainViewModel(
         if (enabled && !current.visionEnabled) {
             throw IllegalArgumentException("后台截图问答需要先开启图片支持")
         }
-            configStore.update(current.copy(backgroundCaptureEnabled = enabled))
+        configStore.update(current.copy(backgroundCaptureEnabled = enabled))
     }
 
     fun deleteApiKey() {

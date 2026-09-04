@@ -3,8 +3,10 @@ package com.example.aichat.data.local
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -28,7 +30,9 @@ class ConfigStoreTest {
 
     @Test
     fun backgroundCaptureIsDisabledByDefault() = runBlocking {
-        assertFalse(store.read().backgroundCaptureEnabled)
+        val config = store.read()
+        assertFalse(config.backgroundCaptureEnabled)
+        assertEquals(DEFAULT_SCREENSHOT_PROMPT, config.screenshotPrompt)
     }
 
     @Test
@@ -38,8 +42,11 @@ class ConfigStoreTest {
             model = "vision-model",
             visionEnabled = true,
             backgroundCaptureEnabled = true,
+            screenshotPrompt = "只回复答案",
         )
 
-        assertTrue(store.read().backgroundCaptureEnabled)
+        val config = store.read()
+        assertTrue(config.backgroundCaptureEnabled)
+        assertEquals("只回复答案", config.screenshotPrompt)
     }
 }
