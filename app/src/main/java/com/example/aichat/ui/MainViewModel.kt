@@ -434,6 +434,17 @@ class MainViewModel(
         configStore.update(current.copy(backgroundCaptureEnabled = enabled))
     }
 
+    /** Persists color and glass choices as soon as the user selects them. */
+    suspend fun setOverlayAppearance(
+        backgroundColor: String,
+        glassEnabled: Boolean,
+    ): Result<Unit> = runCatching {
+        configStore.updateOverlayAppearance(
+            backgroundColor = normalizeOverlayBackgroundColor(backgroundColor),
+            glassEnabled = glassEnabled,
+        )
+    }
+
     fun deleteApiKey() {
         apiKeyStore.clear()
         apiKeyAvailable.value = false

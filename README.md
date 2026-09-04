@@ -29,7 +29,7 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 默认截图提示词为：“回答这张图片里的题目，先告诉我答案，然后再给出简短的解析。如果没有题目，就只回复没有识别到题目”。可在后台截图设置区域直接修改，保存设置后生效；“恢复默认提示词”可随时还原。
 
-悬浮回答背景可在设置页独立选择，保存设置后生效。Android 12 及以上开启“半透明毛玻璃”时会使用系统背景模糊；Android 10 和 11 会自动降级为半透明背景。
+悬浮回答背景可在设置页独立选择，点选颜色或切换毛玻璃后会立即保存，并从下一次悬浮回答开始生效。Android 12 及以上开启“半透明毛玻璃”时会使用系统背景模糊；Android 10 和 11 会自动降级为半透明背景。
 
 设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI BOTOY”无障碍服务仍为开启状态。
 
@@ -72,11 +72,11 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.0`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.1`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.4.1
+git push origin v1.4.1
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -94,11 +94,11 @@ git push origin v1.4.0
 
 ```json
 {
-  "versionCode": 7,
-  "versionName": "1.4.0",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.0/ai-botoy-1.4.0.apk",
+  "versionCode": 8,
+  "versionName": "1.4.1",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.1/ai-botoy-1.4.1.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "releaseNotes": "悬浮回答支持上下滚动、自定义背景颜色和半透明毛玻璃效果"
+  "releaseNotes": "修复悬浮回答颜色与毛玻璃选项未立即生效的问题"
 }
 ```
 

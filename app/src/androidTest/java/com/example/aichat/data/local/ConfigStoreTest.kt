@@ -68,4 +68,28 @@ class ConfigStoreTest {
 
         assertEquals(DEFAULT_OVERLAY_BACKGROUND_COLOR, store.read().overlayBackgroundColor)
     }
+
+    @Test
+    fun overlayAppearanceUpdatesImmediatelyWithoutChangingOtherSettings() = runBlocking {
+        store.update(
+            baseUrl = "https://api.example.test/v1",
+            model = "vision-model",
+            visionEnabled = false,
+            backgroundCaptureEnabled = false,
+            screenshotPrompt = "保留这条提示词",
+        )
+
+        store.updateOverlayAppearance(
+            backgroundColor = "#FFE4D1",
+            glassEnabled = true,
+        )
+
+        val config = store.read()
+        assertEquals("#FFE4D1", config.overlayBackgroundColor)
+        assertTrue(config.overlayGlassEnabled)
+        assertEquals("https://api.example.test/v1", config.baseUrl)
+        assertEquals("vision-model", config.model)
+        assertFalse(config.visionEnabled)
+        assertEquals("保留这条提示词", config.screenshotPrompt)
+    }
 }

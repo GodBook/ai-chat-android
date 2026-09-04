@@ -70,6 +70,17 @@ class ConfigStore(context: Context) {
         overlayGlassEnabled = config.overlayGlassEnabled,
     )
 
+    /** Updates only overlay appearance so an immediate color choice cannot overwrite other settings. */
+    suspend fun updateOverlayAppearance(
+        backgroundColor: String,
+        glassEnabled: Boolean,
+    ) {
+        dataStore.edit { preferences ->
+            preferences[OVERLAY_BACKGROUND_COLOR] = normalizeOverlayBackgroundColor(backgroundColor)
+            preferences[OVERLAY_GLASS_ENABLED] = glassEnabled
+        }
+    }
+
     suspend fun reset() {
         dataStore.edit { it.clear() }
     }

@@ -28,6 +28,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: ScreenshotOverlayManager
     private lateinit var questionProcessor: ScreenshotQuestionProcessor
     @Volatile private var enabled = false
+    @Volatile private var latestConfig = ProviderConfig()
     private var configJob: Job? = null
     private var captureJob: Job? = null
     private var screenshotPending = false
@@ -49,6 +50,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
         configJob?.cancel()
         configJob = serviceScope.launch {
             app.container.configStore.config.collectLatest { config ->
+                latestConfig = config
                 enabled = config.backgroundCaptureEnabled
             }
         }
@@ -171,15 +173,12 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     }
 
     private fun showFeedback(message: String, config: ProviderConfig? = null) {
-        val shown = if (config == null) {
-            overlayManager.show(message)
-        } else {
-            overlayManager.show(
-                answer = message,
-                backgroundColor = config.overlayBackgroundColor,
-                glassEnabled = config.overlayGlassEnabled,
-            )
-        }
+        val appearance = config ?: latestConfig
+        val shown = overlayManager.show(
+            answer = message,
+            backgroundColor = appearance.overlayBackgroundColor,
+            glassEnabled = appearance.overlayGlassEnabled,
+        )
         if (!shown) {
             Toast.makeText(this, message.take(180), Toast.LENGTH_LONG).show()
         }

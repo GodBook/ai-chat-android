@@ -276,6 +276,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             }
                         }
                     },
+                    onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,
                     onDownloadUpdate = viewModel::downloadUpdate,
@@ -1016,6 +1017,7 @@ private fun MarkdownTable(table: MarkdownBlockModel.Table) {
 private fun OverlayAppearanceSettings(
     backgroundColor: String,
     glassEnabled: Boolean,
+    enabled: Boolean,
     onBackgroundColorChanged: (String) -> Unit,
     onGlassChanged: (Boolean) -> Unit,
 ) {
@@ -1038,6 +1040,7 @@ private fun OverlayAppearanceSettings(
                         .clip(RoundedCornerShape(6.dp))
                         .selectable(
                             selected = selected,
+                            enabled = enabled,
                             role = Role.RadioButton,
                             onClick = { onBackgroundColorChanged(preset.colorHex) },
                         )
@@ -1114,7 +1117,11 @@ private fun OverlayAppearanceSettings(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = glassEnabled, onCheckedChange = onGlassChanged)
+            Switch(
+                checked = glassEnabled,
+                enabled = enabled,
+                onCheckedChange = onGlassChanged,
+            )
         }
     }
 }
@@ -1126,6 +1133,7 @@ private fun SettingsScreen(
     onBack: () -> Unit,
     onSave: suspend (String, String, String, Boolean, String, Boolean, String, String, Boolean) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
+    onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
@@ -1158,6 +1166,7 @@ private fun SettingsScreen(
     var saved by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var updatingBackgroundCapture by remember { mutableStateOf(false) }
+    var updatingOverlayAppearance by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -1321,13 +1330,48 @@ private fun SettingsScreen(
             OverlayAppearanceSettings(
                 backgroundColor = overlayBackgroundColor,
                 glassEnabled = overlayGlassEnabled,
-                onBackgroundColorChanged = {
-                    overlayBackgroundColor = it
+                enabled = !saving && !updatingOverlayAppearance,
+                onBackgroundColorChanged = { requestedColor ->
+                    val previousColor = overlayBackgroundColor
+                    overlayBackgroundColor = requestedColor
                     saved = false
+                    updatingOverlayAppearance = true
+                    scope.launch {
+                        try {
+                            onOverlayAppearanceChanged(requestedColor, overlayGlassEnabled)
+                                .onSuccess {
+                                    error = null
+                                    saved = true
+                                }
+                                .onFailure {
+                                    overlayBackgroundColor = previousColor
+                                    error = it.message ?: "悬浮回答外观保存失败"
+                                }
+                        } finally {
+                            updatingOverlayAppearance = false
+                        }
+                    }
                 },
-                onGlassChanged = {
-                    overlayGlassEnabled = it
+                onGlassChanged = { requestedGlass ->
+                    val previousGlass = overlayGlassEnabled
+                    overlayGlassEnabled = requestedGlass
                     saved = false
+                    updatingOverlayAppearance = true
+                    scope.launch {
+                        try {
+                            onOverlayAppearanceChanged(overlayBackgroundColor, requestedGlass)
+                                .onSuccess {
+                                    error = null
+                                    saved = true
+                                }
+                                .onFailure {
+                                    overlayGlassEnabled = previousGlass
+                                    error = it.message ?: "悬浮回答外观保存失败"
+                                }
+                        } finally {
+                            updatingOverlayAppearance = false
+                        }
+                    }
                 },
             )
             if (backgroundCaptureEnabled) {
@@ -1495,7 +1539,7 @@ private fun SettingsScreen(
                             }
                         }
                     },
-                    enabled = !saving,
+                    enabled = !saving && !updatingOverlayAppearance,
                     modifier = Modifier.weight(1f),
                 ) {
                     if (saving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
