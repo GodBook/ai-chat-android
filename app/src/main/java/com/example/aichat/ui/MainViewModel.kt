@@ -16,6 +16,9 @@ import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.model.ProviderConfig
+import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
+import com.example.aichat.data.model.DEFAULT_OVERLAY_GLASS_ENABLED
+import com.example.aichat.data.model.normalizeOverlayBackgroundColor
 import com.example.aichat.data.network.ChatClientException
 import com.example.aichat.data.repository.ChatRepository
 import com.example.aichat.data.update.AppUpdateException
@@ -380,6 +383,8 @@ class MainViewModel(
         updateManifestUrl: String? = null,
         backgroundCaptureEnabled: Boolean,
         screenshotPrompt: String,
+        overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
+        overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -412,6 +417,8 @@ class MainViewModel(
                 visionEnabled = visionEnabled,
                 backgroundCaptureEnabled = backgroundCaptureEnabled,
                 screenshotPrompt = normalizedScreenshotPrompt,
+                overlayBackgroundColor = normalizeOverlayBackgroundColor(overlayBackgroundColor),
+                overlayGlassEnabled = overlayGlassEnabled,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()

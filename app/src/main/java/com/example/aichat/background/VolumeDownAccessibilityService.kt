@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import com.example.aichat.AiChatApplication
+import com.example.aichat.data.model.ProviderConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -156,11 +157,11 @@ class VolumeDownAccessibilityService : AccessibilityService() {
             }
             try {
                 val answer = questionProcessor.process(bitmap, config.screenshotPrompt)
-                showFeedback(answer)
+                showFeedback(answer, config)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
-                showFeedback(failure.message ?: "截屏问答失败")
+                showFeedback(failure.message ?: "截屏问答失败", config)
             } finally {
                 captureJob = null
             }
@@ -169,8 +170,17 @@ class VolumeDownAccessibilityService : AccessibilityService() {
         job.start()
     }
 
-    private fun showFeedback(message: String) {
-        if (!overlayManager.show(message)) {
+    private fun showFeedback(message: String, config: ProviderConfig? = null) {
+        val shown = if (config == null) {
+            overlayManager.show(message)
+        } else {
+            overlayManager.show(
+                answer = message,
+                backgroundColor = config.overlayBackgroundColor,
+                glassEnabled = config.overlayGlassEnabled,
+            )
+        }
+        if (!shown) {
             Toast.makeText(this, message.take(180), Toast.LENGTH_LONG).show()
         }
     }

@@ -11,8 +11,9 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 - 渲染标题、段落、粗体、斜体、行内代码、链接、列表、引用、GFM 表格与代码块
 - 长按 AI 回复，使用 Android 系统选文工具精确选择文字
 - 从系统相册选图，以 Base64 data URL 发送给支持视觉输入的模型
-- 可选开启后台音量下键截屏问答：截取当前屏幕、创建独立会话发送给 AI，并用类似 QQ 消息通知的浅蓝横幅在屏幕顶部显示回答
-- 顶部悬浮回答支持左右滑动关闭，也会在显示一段时间后自动消失
+- 可选开启后台音量下键截屏问答：截取当前屏幕、创建独立会话发送给 AI，并用类似 QQ 消息通知的横幅在屏幕顶部显示回答
+- 顶部悬浮回答保持固定大小，可上下滑动查看完整回答、左右滑动关闭，也会在显示一段时间后自动消失
+- 可为悬浮回答选择浅蓝、薄荷、杏橙、玫瑰或雾灰背景，并可开启半透明毛玻璃效果
 - 可自定义截图随附的 AI 提示词，并可一键恢复默认提示词
 - 通过 HTTPS 更新清单检查、下载并安装新版 APK
 - 使用 Room 保存聊天记录，DataStore 保存普通设置，Android Keystore 加密 API Key
@@ -27,6 +28,8 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 在“设置”中开启“音量下键后台截图问答”后，开关会立即保存，进入后台或重新打开应用不会将其关闭，只有用户手动关闭开关才会停用功能。Android 11 及以上需要开启悬浮窗和音量监听（无障碍服务），截图由无障碍服务直接完成；Android 10 还需要单独授予屏幕捕获权限。授权完成后，即使应用退到后台，按音量下键也会创建一个“截屏问答”会话并显示 AI 回答。
 
 默认截图提示词为：“回答这张图片里的题目，先告诉我答案，然后再给出简短的解析。如果没有题目，就只回复没有识别到题目”。可在后台截图设置区域直接修改，保存设置后生效；“恢复默认提示词”可随时还原。
+
+悬浮回答背景可在设置页独立选择，保存设置后生效。Android 12 及以上开启“半透明毛玻璃”时会使用系统背景模糊；Android 10 和 11 会自动降级为半透明背景。
 
 设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI BOTOY”无障碍服务仍为开启状态。
 
@@ -69,11 +72,11 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.3.0`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.0`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.3.0
-git push origin v1.3.0
+git tag v1.4.0
+git push origin v1.4.0
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -91,11 +94,11 @@ git push origin v1.3.0
 
 ```json
 {
-  "versionCode": 6,
-  "versionName": "1.3.0",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.3.0/ai-botoy-1.3.0.apk",
+  "versionCode": 7,
+  "versionName": "1.4.0",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.0/ai-botoy-1.4.0.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "releaseNotes": "优化悬浮回答样式并支持自定义截图提示词"
+  "releaseNotes": "悬浮回答支持上下滚动、自定义背景颜色和半透明毛玻璃效果"
 }
 ```
 

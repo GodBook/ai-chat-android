@@ -133,7 +133,14 @@ class BackgroundScreenshotService : Service() {
             try {
                 val bitmap = captureManager.capture()
                 val answer = questionProcessor.process(bitmap, config.screenshotPrompt)
-                if (!overlayManager.show(answer)) notifyStatus(answer)
+                if (!overlayManager.show(
+                        answer = answer,
+                        backgroundColor = config.overlayBackgroundColor,
+                        glassEnabled = config.overlayGlassEnabled,
+                    )
+                ) {
+                    notifyStatus(answer)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {

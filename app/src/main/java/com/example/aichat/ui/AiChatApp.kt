@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -36,6 +37,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -140,6 +142,7 @@ import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
+import com.example.aichat.data.model.OVERLAY_COLOR_PRESETS
 import com.example.aichat.data.update.InstallPreparation
 import kotlinx.coroutines.launch
 import java.io.File
@@ -236,6 +239,8 @@ fun AiChatApp(viewModel: MainViewModel) {
                             updateUrl,
                             backgroundEnabled,
                             screenshotPrompt,
+                            overlayBackgroundColor,
+                            overlayGlassEnabled,
                         ->
                         viewModel.saveConfig(
                             baseUrl = baseUrl,
@@ -245,6 +250,8 @@ fun AiChatApp(viewModel: MainViewModel) {
                             updateManifestUrl = updateUrl,
                             backgroundCaptureEnabled = backgroundEnabled,
                             screenshotPrompt = screenshotPrompt,
+                            overlayBackgroundColor = overlayBackgroundColor,
+                            overlayGlassEnabled = overlayGlassEnabled,
                         ).also { result ->
                             if (result.isSuccess) {
                                 if (backgroundEnabled) {
@@ -1005,12 +1012,119 @@ private fun MarkdownTable(table: MarkdownBlockModel.Table) {
     }
 }
 
+@Composable
+private fun OverlayAppearanceSettings(
+    backgroundColor: String,
+    glassEnabled: Boolean,
+    onBackgroundColorChanged: (String) -> Unit,
+    onGlassChanged: (Boolean) -> Unit,
+) {
+    val previewColor = Color(android.graphics.Color.parseColor(backgroundColor))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "悬浮回答外观",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OVERLAY_COLOR_PRESETS.forEach { preset ->
+                val selected = backgroundColor == preset.colorHex
+                Column(
+                    modifier = Modifier
+                        .width(58.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .selectable(
+                            selected = selected,
+                            role = Role.RadioButton,
+                            onClick = { onBackgroundColorChanged(preset.colorHex) },
+                        )
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(android.graphics.Color.parseColor(preset.colorHex)))
+                            .border(
+                                width = if (selected) 3.dp else 1.dp,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant
+                                },
+                                shape = CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (selected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF153C47),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                    Text(preset.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
+            }
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = previewColor.copy(alpha = if (glassEnabled) 0.72f else 0.97f),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.75f)),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Default.SmartToy,
+                    contentDescription = null,
+                    tint = Color(0xFF0F766E),
+                    modifier = Modifier.size(22.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("AI 截屏回答", fontWeight = FontWeight.SemiBold, color = Color(0xFF193D49))
+                    Text("回答外观预览", style = MaterialTheme.typography.bodySmall, color = Color(0xFF365B67))
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("半透明毛玻璃", fontWeight = FontWeight.Medium)
+                Text(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        "半透明背景与系统模糊"
+                    } else {
+                        "当前系统使用半透明效果"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = glassEnabled, onCheckedChange = onGlassChanged)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(
     state: MainUiState,
     onBack: () -> Unit,
-    onSave: suspend (String, String, String, Boolean, String, Boolean, String) -> Result<Unit>,
+    onSave: suspend (String, String, String, Boolean, String, Boolean, String, String, Boolean) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
@@ -1031,6 +1145,12 @@ private fun SettingsScreen(
     }
     var screenshotPrompt by rememberSaveable(state.config.screenshotPrompt) {
         mutableStateOf(state.config.screenshotPrompt)
+    }
+    var overlayBackgroundColor by rememberSaveable(state.config.overlayBackgroundColor) {
+        mutableStateOf(state.config.overlayBackgroundColor)
+    }
+    var overlayGlassEnabled by rememberSaveable(state.config.overlayGlassEnabled) {
+        mutableStateOf(state.config.overlayGlassEnabled)
     }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
@@ -1198,6 +1318,18 @@ private fun SettingsScreen(
                     },
                 )
             }
+            OverlayAppearanceSettings(
+                backgroundColor = overlayBackgroundColor,
+                glassEnabled = overlayGlassEnabled,
+                onBackgroundColorChanged = {
+                    overlayBackgroundColor = it
+                    saved = false
+                },
+                onGlassChanged = {
+                    overlayGlassEnabled = it
+                    saved = false
+                },
+            )
             if (backgroundCaptureEnabled) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -1353,6 +1485,8 @@ private fun SettingsScreen(
                                     updateManifestUrl,
                                     backgroundCaptureEnabled,
                                     screenshotPrompt,
+                                    overlayBackgroundColor,
+                                    overlayGlassEnabled,
                                 )
                                     .onSuccess { error = null; saved = true; apiKey = "" }
                                     .onFailure { error = it.message ?: "保存失败"; saved = false }
