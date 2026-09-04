@@ -15,15 +15,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.aichat.AiChatApplication
 import com.example.aichat.R
-import com.example.aichat.data.model.MessageStatus
-import com.example.aichat.data.network.ChatClientException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** Foreground worker that captures a frame and sends it through the normal chat repository. */
@@ -33,22 +30,21 @@ class BackgroundScreenshotService : Service() {
     private lateinit var app: AiChatApplication
     private lateinit var captureManager: ScreenCaptureManager
     private lateinit var overlayManager: ScreenshotOverlayManager
+    private lateinit var questionProcessor: ScreenshotQuestionProcessor
     private var projectionJob: Job? = null
     private var captureJob: Job? = null
-    private var configJob: Job? = null
+
+    internal val hasProjection: Boolean
+        get() = ::captureManager.isInitialized && captureManager.hasProjection
 
     override fun onCreate() {
         super.onCreate()
         app = application as AiChatApplication
         captureManager = ScreenCaptureManager(this)
         overlayManager = ScreenshotOverlayManager(this)
+        questionProcessor = ScreenshotQuestionProcessor(app)
         createNotificationChannel()
-        val configStore = app.container.configStore
-        configJob = serviceScope.launch {
-            configStore.config.collectLatest { config ->
-                if (!config.backgroundCaptureEnabled) stopSelf()
-            }
-        }
+        BackgroundScreenshotManager.attach(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -60,6 +56,7 @@ class BackgroundScreenshotService : Service() {
             BackgroundScreenshotManager.ACTION_START,
             BackgroundScreenshotManager.ACTION_CAPTURE_NOW,
             null -> Unit
+            else -> return START_STICKY
         }
         val projectionData = intent?.parcelableIntentExtra(
             BackgroundScreenshotManager.EXTRA_PROJECTION_DATA,
@@ -68,40 +65,47 @@ class BackgroundScreenshotService : Service() {
             BackgroundScreenshotManager.EXTRA_PROJECTION_RESULT_CODE,
             Int.MIN_VALUE,
         ) != Int.MIN_VALUE && projectionData != null
-        if (intent?.action == BackgroundScreenshotManager.ACTION_CAPTURE_NOW &&
-            !captureManager.hasProjection && !hasNewProjectionGrant &&
-            projectionJob?.isActive != true
-        ) {
-            notifyStatus("后台进程已重启，请回到设置重新授权屏幕捕获")
-            stopSelf()
-            return START_NOT_STICKY
-        }
         try {
+            // Every start path uses startForegroundService(), so promote it immediately before
+            // doing any projection or configuration work.
             startForegroundCompat()
         } catch (_: SecurityException) {
             notifyStatus("系统拒绝启动屏幕捕获服务，请重新授权屏幕捕获")
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == BackgroundScreenshotManager.ACTION_CAPTURE_NOW &&
+            !captureManager.hasProjection && !hasNewProjectionGrant &&
+            projectionJob?.isActive != true
+        ) {
+            notifyStatus("后台进程已重启，请回到设置重新授权屏幕捕获")
+            // A MediaProjection grant is tied to the current process. Keep the switch enabled so
+            // the user can renew the grant from Settings instead of silently turning it off.
+            return START_STICKY
+        }
         applyProjectionGrant(intent)
         if (intent?.action == BackgroundScreenshotManager.ACTION_CAPTURE_NOW) requestCapture()
-        // MediaProjection grants are process/session scoped and cannot be recreated after a
-        // process-death restart. Avoid a zombie foreground service; the next key press will
-        // start it again and the UI can request a fresh grant when needed.
-        return START_NOT_STICKY
+        // Keep the worker alive while the user-controlled switch is enabled. The projection grant
+        // may still need to be renewed after a process death.
+        return START_STICKY
     }
 
     override fun onDestroy() {
         captureJob?.cancel()
         projectionJob?.cancel()
-        configJob?.cancel()
         overlayManager.dismiss()
         captureManager.close()
+        BackgroundScreenshotManager.detach(this)
         serviceJob.cancel()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** Called by the accessibility service when this worker is already alive. */
+    internal fun captureFromTrigger() {
+        requestCapture()
+    }
 
     private fun applyProjectionGrant(intent: Intent?) {
         val resultCode = intent?.getIntExtra(
@@ -126,52 +130,18 @@ class BackgroundScreenshotService : Service() {
                 return@launch
             }
             if (!config.backgroundCaptureEnabled) return@launch
-            var imagePath: String? = null
-            var requestWasPersisted = false
-            var sendStarted = false
             try {
                 val bitmap = captureManager.capture()
-                try {
-                    imagePath = app.container.imageFileStore.saveScreenshot(bitmap)
-                } finally {
-                    bitmap.recycle()
-                }
-                val conversation = app.container.chatRepository.createConversation("截屏问答")
-                sendStarted = true
-                val assistantId = try {
-                    app.container.chatRepository.sendMessage(
-                        conversation.id,
-                        SCREENSHOT_PROMPT,
-                        listOf(imagePath),
-                    )
-                } catch (failure: ChatClientException) {
-                    requestWasPersisted = failure.requestWasPersisted
-                    throw failure
-                }
-                requestWasPersisted = true
-                val answer = awaitAssistantText(conversation.id, assistantId)
+                val answer = questionProcessor.process(bitmap)
                 if (!overlayManager.show(answer)) notifyStatus(answer)
             } catch (cancelled: CancellationException) {
-                if (!sendStarted && !requestWasPersisted) {
-                    imagePath?.let { runCatching { app.container.imageFileStore.delete(it) } }
-                }
                 throw cancelled
             } catch (failure: Throwable) {
-                if (!requestWasPersisted) {
-                    imagePath?.let { runCatching { app.container.imageFileStore.delete(it) } }
-                }
                 notifyStatus(failure.message ?: "截屏问答失败")
             } finally {
                 captureJob = null
             }
         }
-    }
-
-    private suspend fun awaitAssistantText(conversationId: String, assistantId: String): String {
-        val message = app.container.chatRepository.observeMessages(conversationId).first { messages ->
-            messages.any { it.id == assistantId && it.status == MessageStatus.SENT }
-        }.firstOrNull { it.id == assistantId }
-        return message?.text?.trim().orEmpty().ifEmpty { "AI 没有返回可显示的内容" }
     }
 
     private fun startForegroundCompat() {
@@ -235,7 +205,6 @@ class BackgroundScreenshotService : Service() {
         const val NOTIFICATION_CHANNEL_ID = "background_screenshot"
         const val FOREGROUND_NOTIFICATION_ID = 1201
         const val ANSWER_NOTIFICATION_ID = 1202
-        const val SCREENSHOT_PROMPT = "请分析这张屏幕截图，概括当前屏幕内容并直接回答用户可能需要了解的问题。请使用简洁、清晰的中文。"
     }
 }
 

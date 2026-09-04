@@ -377,7 +377,7 @@ class MainViewModel(
         apiKey: String,
         visionEnabled: Boolean,
         updateManifestUrl: String? = null,
-        backgroundCaptureEnabled: Boolean = false,
+        backgroundCaptureEnabled: Boolean,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -404,6 +404,15 @@ class MainViewModel(
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
         }
+    }
+
+    /** Persists the background screenshot switch without requiring the rest of the form to be saved. */
+    suspend fun setBackgroundCaptureEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        val current = configStore.read()
+        if (enabled && !current.visionEnabled) {
+            throw IllegalArgumentException("后台截图问答需要先开启图片支持")
+        }
+            configStore.update(current.copy(backgroundCaptureEnabled = enabled))
     }
 
     fun deleteApiKey() {

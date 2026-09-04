@@ -30,7 +30,11 @@ class ScreenshotOverlayManager(context: Context) {
     }
 
     fun dismiss() {
-        mainHandler.post(::removeCurrent)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            removeCurrent()
+        } else {
+            mainHandler.post(::removeCurrent)
+        }
     }
 
     private fun removeCurrent() {

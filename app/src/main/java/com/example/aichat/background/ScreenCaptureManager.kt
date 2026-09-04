@@ -17,6 +17,7 @@ import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import kotlin.coroutines.resume
@@ -80,19 +81,21 @@ class ScreenCaptureManager(private val context: Context) : AutoCloseable {
             releaseCaptureResources()
         }
 
-        suspendCancellableCoroutine { continuation ->
-            check(pendingCapture == null) { "截图请求正在处理中" }
-            pendingCapture = continuation
-            continuation.invokeOnCancellation {
-                mainHandler.post {
-                    if (pendingCapture === continuation) pendingCapture = null
+        withTimeout(CAPTURE_TIMEOUT_MS) {
+            suspendCancellableCoroutine { continuation ->
+                check(pendingCapture == null) { "截图请求正在处理中" }
+                pendingCapture = continuation
+                continuation.invokeOnCancellation {
+                    mainHandler.post {
+                        if (pendingCapture === continuation) pendingCapture = null
+                    }
                 }
-            }
-            try {
-                ensureVirtualDisplay(activeProjection, width, height, density)
-            } catch (failure: Throwable) {
-                if (pendingCapture === continuation) pendingCapture = null
-                continuation.resumeWithException(failure)
+                try {
+                    ensureVirtualDisplay(activeProjection, width, height, density)
+                } catch (failure: Throwable) {
+                    if (pendingCapture === continuation) pendingCapture = null
+                    continuation.resumeWithException(failure)
+                }
             }
         }
     }
@@ -193,5 +196,9 @@ class ScreenCaptureManager(private val context: Context) : AutoCloseable {
         projectionCallback = null
         projection = null
         current?.stop()
+    }
+
+    private companion object {
+        const val CAPTURE_TIMEOUT_MS = 5_000L
     }
 }

@@ -22,7 +22,9 @@
 3. 点击“保存设置”，返回聊天列表并进入一个聊天。
 4. 输入文字或选择图片后发送。生成期间可点击停止按钮，失败或中断的回复可手动重试。
 
-在“设置”中开启“音量下键后台截图问答”后，首次使用还需要分别授权屏幕捕获、悬浮窗和音量监听（无障碍服务）。授权完成后，即使应用退到后台，按音量下键也会创建一个“截屏问答”会话并显示 AI 回答。屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。
+在“设置”中开启“音量下键后台截图问答”后，开关会立即保存，进入后台或重新打开应用不会将其关闭，只有用户手动关闭开关才会停用功能。Android 11 及以上需要开启悬浮窗和音量监听（无障碍服务），截图由无障碍服务直接完成；Android 10 还需要单独授予屏幕捕获权限。授权完成后，即使应用退到后台，按音量下键也会创建一个“截屏问答”会话并显示 AI 回答。
+
+设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI 聊天”无障碍服务仍为开启状态。
 
 应用由手机直接连接所填写的模型服务，Base URL 必须使用 HTTPS。API Key 只会加密保存在本机，但会在请求时发送给该服务，请仅使用可信接口。
 
@@ -63,11 +65,11 @@
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2.1`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.2
-git push origin v1.2
+git tag v1.2.1
+git push origin v1.2.1
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -85,11 +87,11 @@ git push origin v1.2
 
 ```json
 {
-  "versionCode": 3,
-  "versionName": "1.2",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2/ai-chat-android-1.2.apk",
+  "versionCode": 4,
+  "versionName": "1.2.1",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2.1/ai-chat-android-1.2.1.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "releaseNotes": "新增功能并修复稳定性问题"
+  "releaseNotes": "修复后台截图开关与音量下键截图"
 }
 ```
 

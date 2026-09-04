@@ -2,7 +2,9 @@ package com.example.aichat.ui
 
 import android.content.ActivityNotFoundException
 import android.app.Activity
+import android.os.Build
 import android.text.format.DateUtils
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -88,8 +90,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -122,6 +126,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -151,8 +158,17 @@ fun AiChatApp(viewModel: MainViewModel) {
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         val data = result.data
-        if (result.resultCode == Activity.RESULT_OK && data != null) {
+        if (state.config.backgroundCaptureEnabled && result.resultCode == Activity.RESULT_OK && data != null) {
             BackgroundScreenshotManager.start(context, result.resultCode, data)
+        }
+    }
+
+    // Re-assert the user-selected service state whenever the activity is recreated or returns
+    // from a system permission screen. The switch itself remains the source of truth; there is
+    // deliberately no matching automatic stop here.
+    LaunchedEffect(state.config.backgroundCaptureEnabled) {
+        if (state.config.backgroundCaptureEnabled) {
+            runCatching { BackgroundScreenshotManager.start(context) }
         }
     }
 
@@ -210,7 +226,38 @@ fun AiChatApp(viewModel: MainViewModel) {
                 SettingsScreen(
                     state = state,
                     onBack = { navController.popBackStack() },
-                    onSave = viewModel::saveConfig,
+                    onSave = { baseUrl, model, apiKey, visionEnabled, updateUrl, backgroundEnabled ->
+                        viewModel.saveConfig(
+                            baseUrl = baseUrl,
+                            model = model,
+                            apiKey = apiKey,
+                            visionEnabled = visionEnabled,
+                            updateManifestUrl = updateUrl,
+                            backgroundCaptureEnabled = backgroundEnabled,
+                        ).also { result ->
+                            if (result.isSuccess) {
+                                if (backgroundEnabled) {
+                                    runCatching { BackgroundScreenshotManager.start(context) }
+                                } else {
+                                    BackgroundScreenshotManager.stop(context)
+                                }
+                            }
+                        }
+                    },
+                    onBackgroundCaptureChanged = { enabled ->
+                        viewModel.setBackgroundCaptureEnabled(enabled).also { result ->
+                            if (result.isSuccess) {
+                                if (enabled) {
+                                    // Start the worker immediately after the preference is
+                                    // persisted. The projection grant can then be supplied from
+                                    // the permission button without a startup race.
+                                    runCatching { BackgroundScreenshotManager.start(context) }
+                                } else {
+                                    BackgroundScreenshotManager.stop(context)
+                                }
+                            }
+                        }
+                    },
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,
                     onDownloadUpdate = viewModel::downloadUpdate,
@@ -218,6 +265,17 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onDismissUpdate = viewModel::dismissUpdate,
                     onRequestProjection = {
                         projectionLauncher.launch(BackgroundScreenshotManager.projectionPermissionIntent(context))
+                    },
+                    onCaptureNow = {
+                        val accepted = runCatching { BackgroundScreenshotManager.captureNow(context) }
+                            .getOrDefault(false)
+                        if (!accepted) {
+                            Toast.makeText(
+                                context,
+                                "请确认音量监听已开启，且当前没有正在处理的截图",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     },
                     onOpenOverlaySettings = { BackgroundScreenshotManager.openOverlaySettings(context) },
                     onOpenAccessibilitySettings = { BackgroundScreenshotManager.openAccessibilitySettings(context) },
@@ -942,12 +1000,14 @@ private fun SettingsScreen(
     state: MainUiState,
     onBack: () -> Unit,
     onSave: suspend (String, String, String, Boolean, String, Boolean) -> Result<Unit>,
+    onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
     onPrepareUpdate: () -> InstallPreparation?,
     onDismissUpdate: () -> Unit,
     onRequestProjection: () -> Unit,
+    onCaptureNow: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
 ) {
@@ -963,10 +1023,34 @@ private fun SettingsScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var saved by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var updatingBackgroundCapture by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var permissionRefresh by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) permissionRefresh++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val overlayPermissionGranted = remember(permissionRefresh) {
+        BackgroundScreenshotManager.canDrawOverlays(context)
+    }
+    val accessibilityPermissionGranted = remember(permissionRefresh) {
+        BackgroundScreenshotManager.isAccessibilityServiceEnabled(context)
+    }
+    val usesAccessibilityScreenshot = BackgroundScreenshotManager.usesAccessibilityScreenshot
+    val screenshotPermissionGranted = if (usesAccessibilityScreenshot) {
+        accessibilityPermissionGranted
+    } else {
+        BackgroundScreenshotManager.hasActiveProjection
+    }
+    val backgroundPermissionsReady = screenshotPermissionGranted &&
+        overlayPermissionGranted && accessibilityPermissionGranted
 
     val launchInstallIntent: (android.content.Intent) -> Unit = { intent ->
         try {
@@ -1076,29 +1160,76 @@ private fun SettingsScreen(
                 }
                 Switch(
                     checked = backgroundCaptureEnabled,
-                    onCheckedChange = { backgroundCaptureEnabled = it; saved = false },
+                    enabled = !saving && !updatingBackgroundCapture,
+                    onCheckedChange = { requested ->
+                        val previous = backgroundCaptureEnabled
+                        backgroundCaptureEnabled = requested
+                        saved = false
+                        updatingBackgroundCapture = true
+                        scope.launch {
+                            try {
+                                onBackgroundCaptureChanged(requested)
+                                    .onSuccess {
+                                        error = null
+                                        saved = true
+                                    }
+                                    .onFailure {
+                                        backgroundCaptureEnabled = previous
+                                        error = it.message ?: "后台截图设置保存失败"
+                                    }
+                            } finally {
+                                updatingBackgroundCapture = false
+                            }
+                        }
+                    },
                 )
             }
             if (backgroundCaptureEnabled) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "首次使用请授予屏幕捕获、悬浮窗和音量监听权限",
+                        if (usesAccessibilityScreenshot) {
+                            "开关会立即保存，只会由你手动关闭。请开启悬浮窗和音量监听，并在系统无障碍设置中选择“AI 聊天”。Android 11 及以上由无障碍服务直接截图，不需要单独授权屏幕录制。"
+                        } else {
+                            "开关会立即保存，只会由你手动关闭。Android 10 还需授权屏幕捕获、悬浮窗和音量监听。屏幕捕获授权在应用进程被系统结束后需要重新授予。"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = onRequestProjection,
-                            modifier = Modifier.weight(1f),
+                    Text(
+                        if (usesAccessibilityScreenshot) {
+                            "系统截图与音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}"
+                        } else {
+                            "屏幕捕获：${if (screenshotPermissionGranted) "已授权" else "未授权"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (backgroundPermissionsReady) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text("授权屏幕捕获")
+                            OutlinedButton(
+                                onClick = onRequestProjection,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("授权屏幕捕获")
+                            }
+                            OutlinedButton(
+                                onClick = onOpenOverlaySettings,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("开启悬浮窗")
+                            }
                         }
+                    } else {
                         OutlinedButton(
                             onClick = onOpenOverlaySettings,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text("开启悬浮窗")
                         }
@@ -1108,6 +1239,12 @@ private fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("开启音量监听")
+                    }
+                    OutlinedButton(
+                        onClick = onCaptureNow,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("立即测试截图")
                     }
                 }
             }
