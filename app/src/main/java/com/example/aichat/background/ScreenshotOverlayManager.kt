@@ -8,13 +8,18 @@ import android.provider.Settings
 import android.os.Looper
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.aichat.R
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.sign
 
 /** Displays a compact QQ-like answer bubble at the top of the screen. */
 class ScreenshotOverlayManager(context: Context) {
@@ -203,14 +208,15 @@ class ScreenshotOverlayManager(context: Context) {
             )
             alpha = 0f
             translationY = -dp(12).toFloat()
+            isClickable = true
         }
+        attachSwipeToDismiss(root)
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -231,6 +237,79 @@ class ScreenshotOverlayManager(context: Context) {
         }.getOrElse { false }
     }
 
+    /** Allows the floating answer to be dismissed with a horizontal swipe. */
+    private fun attachSwipeToDismiss(view: View) {
+        val touchSlop = ViewConfiguration.get(appContext).scaledTouchSlop
+        var downX = 0f
+        var downY = 0f
+        var dragging = false
+        var dismissing = false
+
+        view.setOnTouchListener { touchedView, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    dragging = false
+                    dismissing = false
+                    true
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaX = event.rawX - downX
+                    val deltaY = event.rawY - downY
+                    if (!dragging && abs(deltaX) > touchSlop && abs(deltaX) > abs(deltaY)) {
+                        dragging = true
+                        touchedView.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    if (dragging) {
+                        touchedView.translationX = deltaX
+                        touchedView.alpha = 1f - (abs(deltaX) / touchedView.width.coerceAtLeast(1)).coerceIn(0f, 0.65f)
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    if (dragging) {
+                        val deltaX = event.rawX - downX
+                        val threshold = max(dp(SWIPE_DISMISS_THRESHOLD_DP).toFloat(), touchedView.width * SWIPE_DISMISS_FRACTION)
+                        if (abs(deltaX) >= threshold) {
+                            dismissing = true
+                            touchedView.animate()
+                                .translationX(sign(deltaX) * (touchedView.width + dp(48)).toFloat())
+                                .alpha(0f)
+                                .setDuration(SWIPE_DISMISS_ANIMATION_MS)
+                                .withEndAction {
+                                    if (currentView === touchedView) removeCurrent()
+                                }
+                                .start()
+                        } else {
+                            touchedView.animate()
+                                .translationX(0f)
+                                .alpha(1f)
+                                .setDuration(SWIPE_RETURN_ANIMATION_MS)
+                                .start()
+                        }
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    if (dragging && !dismissing) {
+                        touchedView.animate()
+                            .translationX(0f)
+                            .alpha(1f)
+                            .setDuration(SWIPE_RETURN_ANIMATION_MS)
+                            .start()
+                    }
+                    true
+                }
+
+                else -> true
+            }
+        }
+    }
+
     private fun roundedBackground(
         color: Int,
         radius: Int,
@@ -247,6 +326,10 @@ class ScreenshotOverlayManager(context: Context) {
     private companion object {
         const val DISPLAY_DURATION_MS = 20_000L
         const val ENTER_ANIMATION_MS = 180L
+        const val SWIPE_DISMISS_ANIMATION_MS = 180L
+        const val SWIPE_RETURN_ANIMATION_MS = 140L
+        const val SWIPE_DISMISS_THRESHOLD_DP = 96
+        const val SWIPE_DISMISS_FRACTION = 0.25f
         const val MAX_ANSWER_LENGTH = 4_000
     }
 }

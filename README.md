@@ -1,6 +1,6 @@
-# AI 聊天
+# AI BOTOY
 
-面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 OpenAI 兼容接口后，可在类似即时通信软件的界面中进行流式文本或图片对话。
+AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 OpenAI 兼容接口后，可在类似即时通信软件的界面中进行流式文本或图片对话。
 
 源码仓库：[github.com/GodBook/ai-chat-android](https://github.com/GodBook/ai-chat-android)
 
@@ -12,6 +12,7 @@
 - 长按 AI 回复，使用 Android 系统选文工具精确选择文字
 - 从系统相册选图，以 Base64 data URL 发送给支持视觉输入的模型
 - 可选开启后台音量下键截屏问答：截取当前屏幕、创建独立会话发送给 AI，并用类似 QQ 消息通知的浅蓝横幅在屏幕顶部显示回答
+- 顶部悬浮回答支持左右滑动关闭，也会在显示一段时间后自动消失
 - 可自定义截图随附的 AI 提示词，并可一键恢复默认提示词
 - 通过 HTTPS 更新清单检查、下载并安装新版 APK
 - 使用 Room 保存聊天记录，DataStore 保存普通设置，Android Keystore 加密 API Key
@@ -27,7 +28,7 @@
 
 默认截图提示词为：“回答这张图片里的题目，先告诉我答案，然后再给出简短的解析。如果没有题目，就只回复没有识别到题目”。可在后台截图设置区域直接修改，保存设置后生效；“恢复默认提示词”可随时还原。
 
-设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI 聊天”无障碍服务仍为开启状态。
+设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI BOTOY”无障碍服务仍为开启状态。
 
 应用由手机直接连接所填写的模型服务，Base URL 必须使用 HTTPS。API Key 只会加密保存在本机，但会在请求时发送给该服务，请仅使用可信接口。
 
@@ -56,7 +57,7 @@
 2. 点击“检查更新”。发现新版本后，可查看版本号和发布说明。
 3. 点击“下载更新”。应用会下载 APK，并校验 SHA-256、包名、版本号和签名。
 4. 下载完成后点击“安装”，再按 Android 系统安装程序的提示确认更新。
-5. 如果系统要求“允许安装未知应用”，请为“AI 聊天”开启该权限并返回；应用会继续发起安装。
+5. 如果系统要求“允许安装未知应用”，请为“AI BOTOY”开启该权限并返回；应用会继续发起安装。
 
 这是覆盖安装流程。更新成功后，Room 聊天记录、图片、DataStore 设置和 Keystore 中的 API Key 均会保留。
 
@@ -68,11 +69,11 @@
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.2.2`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.3.0`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.2.2
-git push origin v1.2.2
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -90,9 +91,9 @@ git push origin v1.2.2
 
 ```json
 {
-  "versionCode": 5,
-  "versionName": "1.2.2",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.2.2/ai-chat-android-1.2.2.apk",
+  "versionCode": 6,
+  "versionName": "1.3.0",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.3.0/ai-botoy-1.3.0.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "releaseNotes": "优化悬浮回答样式并支持自定义截图提示词"
 }
