@@ -73,6 +73,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
@@ -328,7 +329,16 @@ private fun ContactsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("聊天", fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Column {
+                        Text("聊天", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = if (conversations.isEmpty()) "准备你的下一段对话" else "${conversations.size} 个会话",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = {
@@ -343,9 +353,7 @@ private fun ContactsScreen(
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
@@ -360,7 +368,8 @@ private fun ContactsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(conversations, key = { it.id }) { conversation ->
                     ConversationRow(
@@ -448,7 +457,13 @@ private fun ConversationRow(
                     onClick = onClick,
                     onLongClick = { menuExpanded = true },
                 )
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .border(
+                    width = if (selected) 1.dp else 0.dp,
+                    color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent,
+                    shape = RoundedCornerShape(16.dp),
+                ),
             colors = ListItemDefaults.colors(
                 containerColor = if (selected) {
                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
@@ -456,7 +471,7 @@ private fun ConversationRow(
                     MaterialTheme.colorScheme.background
                 },
             ),
-            leadingContent = { AiAvatar(size = 52.dp) },
+            leadingContent = { AiAvatar(size = 50.dp) },
             headlineContent = {
                 Text(conversation.title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             },
@@ -613,6 +628,10 @@ private fun ChatScreen(
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
         },
         bottomBar = {
@@ -689,9 +708,14 @@ private fun EmptyConversation(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        AiAvatar(size = 76.dp)
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f),
+        ) {
+            AiAvatar(size = 76.dp)
+        }
         Spacer(Modifier.height(18.dp))
-        Text("和 AI 助手聊点什么", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text("和 AI 助手聊点什么", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
         Text("在设置中填入 API Key 后，就可以开始对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -708,8 +732,13 @@ private fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
-    Surface(tonalElevation = 2.dp, shadowElevation = 0.dp, modifier = Modifier.imePadding()) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Surface(
+        tonalElevation = 3.dp,
+        shadowElevation = 0.dp,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.imePadding(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             if (selectedImages.isNotEmpty()) {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
@@ -748,12 +777,12 @@ private fun Composer(
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("输入消息") },
                     maxLines = 5,
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(20.dp),
                     enabled = !isWorking,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { if (draft.isNotBlank() || selectedImages.isNotEmpty()) onSend() }),
                 )
-                IconButton(
+                FilledIconButton(
                     onClick = if (isWorking) onStop else onSend,
                     enabled = isWorking || draft.isNotBlank() || selectedImages.isNotEmpty(),
                 ) {
@@ -1071,7 +1100,7 @@ private fun OverlayAppearanceSettings(
                             Icon(
                                 Icons.Default.Check,
                                 contentDescription = null,
-                                tint = Color(0xFF153C47),
+                                tint = Color(0xFF17336F),
                                 modifier = Modifier.size(20.dp),
                             )
                         }
@@ -1094,12 +1123,12 @@ private fun OverlayAppearanceSettings(
                 Icon(
                     Icons.Default.SmartToy,
                     contentDescription = null,
-                    tint = Color(0xFF0F766E),
+                    tint = Color(0xFF315BCE),
                     modifier = Modifier.size(22.dp),
                 )
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("AI 截屏回答", fontWeight = FontWeight.SemiBold, color = Color(0xFF193D49))
-                    Text("回答外观预览", style = MaterialTheme.typography.bodySmall, color = Color(0xFF365B67))
+                    Text("AI 截屏回答", fontWeight = FontWeight.SemiBold, color = Color(0xFF1C2B52))
+                    Text("回答外观预览", style = MaterialTheme.typography.bodySmall, color = Color(0xFF4B5874))
                 }
             }
         }
@@ -1241,7 +1270,12 @@ private fun SettingsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("连接设置", fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("连接设置", fontWeight = FontWeight.SemiBold)
+                        Text("AI BOTOY · v1.4.3", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -1256,6 +1290,11 @@ private fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Spacer(Modifier.height(4.dp))
+            Text(
+                "模型连接",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it; saved = false },
@@ -1285,6 +1324,12 @@ private fun SettingsScreen(
                     }
                 },
             )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+            Text(
+                "聊天能力",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1296,6 +1341,12 @@ private fun SettingsScreen(
                 }
                 Switch(checked = visionEnabled, onCheckedChange = { visionEnabled = it; saved = false })
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+            Text(
+                "后台助手",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,

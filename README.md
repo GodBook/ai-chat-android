@@ -72,11 +72,11 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.2`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.3`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.4.2
-git push origin v1.4.2
+git tag v1.4.3
+git push origin v1.4.3
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -94,9 +94,9 @@ git push origin v1.4.2
 
 ```json
 {
-  "versionCode": 9,
-  "versionName": "1.4.2",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.2/ai-botoy-1.4.2.apk",
+  "versionCode": 10,
+  "versionName": "1.4.3",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.3/ai-botoy-1.4.3.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "releaseNotes": "修复悬浮回答颜色与毛玻璃选项未立即生效的问题"
 }
