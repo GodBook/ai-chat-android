@@ -92,8 +92,9 @@ fun extractShortAnswerIndicator(answer: String): ShortAnswerIndicator? {
         return ShortAnswerIndicator.Choice(value[0] - 'a')
     }
     val judgment = Regex(
-        "(?i)(?:正确答案|答案|结论|判断)\\s*(?:是|为|选)?\\s*[:：]?\\s*(正确|错误|对|错|是|否|true|false)",
+        "(?i)(?:正确答案|答案|结论|判断)\\s*(?:是|为|选)?\\s*[:：]?\\s*(正确|错误|对|错|true|false)",
     ).find(text)
+        ?: Regex("(?i)(?:正确答案|答案|结论|判断)\\s*[:：]\\s*(是|否)").find(text)
         ?: Regex("(?i)(?:^|[\\n。.!！])\\s*(正确|错误|对|错|是|否|true|false)\\s*(?:[。.!！]|$)").find(text)
     if (judgment != null) {
         val value = judgment.groupValues.last().lowercase()
