@@ -49,6 +49,50 @@ class ScreenshotOverlayManager(context: Context) {
         return true
     }
 
+    fun showShortAnswer(indicator: ShortAnswerIndicator): Boolean {
+        if (!Settings.canDrawOverlays(appContext)) return false
+        if (Looper.myLooper() == Looper.getMainLooper()) return addShortAnswer(indicator)
+        mainHandler.post { addShortAnswer(indicator) }
+        return true
+    }
+
+    private fun addShortAnswer(indicator: ShortAnswerIndicator): Boolean {
+        removeCurrent()
+        val box = View(appContext).apply {
+            background = roundedBackground(Color.rgb(128, 128, 128), 1)
+        }
+        val screenWidth = appContext.resources.displayMetrics.widthPixels
+        val sections = when (indicator) {
+            is ShortAnswerIndicator.Choice -> 4
+            is ShortAnswerIndicator.Judgment -> 2
+        }
+        val section = when (indicator) {
+            is ShortAnswerIndicator.Choice -> indicator.option
+            is ShortAnswerIndicator.Judgment -> if (indicator.correct) 0 else 1
+        }
+        val boxWidth = dp(SHORT_BOX_WIDTH_DP)
+        val centerX = ((section + 0.5f) * screenWidth / sections).toInt()
+        val params = WindowManager.LayoutParams(
+            boxWidth,
+            dp(SHORT_BOX_HEIGHT_DP),
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            android.graphics.PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.LEFT
+            x = (centerX - boxWidth / 2).coerceIn(0, (screenWidth - boxWidth).coerceAtLeast(0))
+            y = 0
+        }
+        return runCatching {
+            windowManager.addView(box, params)
+            currentView = box
+            autoDismissRunnable = Runnable { if (currentView === box) removeCurrent() }.also {
+                mainHandler.postDelayed(it, SHORT_DISPLAY_DURATION_MS)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
     fun dismiss() {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             removeCurrent()
@@ -488,6 +532,9 @@ class ScreenshotOverlayManager(context: Context) {
 
     private companion object {
         const val DISPLAY_DURATION_MS = 20_000L
+        const val SHORT_DISPLAY_DURATION_MS = 1_000L
+        const val SHORT_BOX_WIDTH_DP = 32
+        const val SHORT_BOX_HEIGHT_DP = 19
         const val ENTER_ANIMATION_MS = 180L
         const val SWIPE_DISMISS_ANIMATION_MS = 180L
         const val SWIPE_RETURN_ANIMATION_MS = 140L

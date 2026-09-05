@@ -35,6 +35,7 @@ class ConfigStore(context: Context) {
                 preferences[OVERLAY_BACKGROUND_COLOR] ?: DEFAULT_OVERLAY_BACKGROUND_COLOR,
             ),
             overlayGlassEnabled = preferences[OVERLAY_GLASS_ENABLED] ?: DEFAULT_OVERLAY_GLASS_ENABLED,
+            shortAnswerModeEnabled = preferences[SHORT_ANSWER_MODE_ENABLED] ?: false,
         )
     }
 
@@ -48,6 +49,7 @@ class ConfigStore(context: Context) {
         screenshotPrompt: String = DEFAULT_SCREENSHOT_PROMPT,
         overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
         overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
+        shortAnswerModeEnabled: Boolean = false,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -57,6 +59,7 @@ class ConfigStore(context: Context) {
             preferences[SCREENSHOT_PROMPT] = screenshotPrompt.trim()
             preferences[OVERLAY_BACKGROUND_COLOR] = normalizeOverlayBackgroundColor(overlayBackgroundColor)
             preferences[OVERLAY_GLASS_ENABLED] = overlayGlassEnabled
+            preferences[SHORT_ANSWER_MODE_ENABLED] = shortAnswerModeEnabled
         }
     }
 
@@ -68,6 +71,7 @@ class ConfigStore(context: Context) {
         screenshotPrompt = config.screenshotPrompt,
         overlayBackgroundColor = config.overlayBackgroundColor,
         overlayGlassEnabled = config.overlayGlassEnabled,
+        shortAnswerModeEnabled = config.shortAnswerModeEnabled,
     )
 
     /** Updates only overlay appearance so an immediate color choice cannot overwrite other settings. */
@@ -95,5 +99,6 @@ class ConfigStore(context: Context) {
         val SCREENSHOT_PROMPT = stringPreferencesKey("screenshot_prompt")
         val OVERLAY_BACKGROUND_COLOR = stringPreferencesKey("overlay_background_color")
         val OVERLAY_GLASS_ENABLED = booleanPreferencesKey("overlay_glass_enabled")
+        val SHORT_ANSWER_MODE_ENABLED = booleanPreferencesKey("short_answer_mode_enabled")
     }
 }

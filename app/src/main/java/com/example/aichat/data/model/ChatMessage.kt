@@ -70,6 +70,8 @@ data class ProviderConfig(
     val overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
     /** Enables a translucent background with system blur where supported. */
     val overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
+    /** Shows only a one-second answer indicator for recognized choice/judgment questions. */
+    val shortAnswerModeEnabled: Boolean = false,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

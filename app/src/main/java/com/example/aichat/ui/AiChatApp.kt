@@ -241,6 +241,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             screenshotPrompt,
                             overlayBackgroundColor,
                             overlayGlassEnabled,
+                            shortAnswerModeEnabled,
                         ->
                         viewModel.saveConfig(
                             baseUrl = baseUrl,
@@ -252,6 +253,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             screenshotPrompt = screenshotPrompt,
                             overlayBackgroundColor = overlayBackgroundColor,
                             overlayGlassEnabled = overlayGlassEnabled,
+                            shortAnswerModeEnabled = shortAnswerModeEnabled,
                         ).also { result ->
                             if (result.isSuccess) {
                                 if (backgroundEnabled) {
@@ -1131,7 +1133,7 @@ private fun OverlayAppearanceSettings(
 private fun SettingsScreen(
     state: MainUiState,
     onBack: () -> Unit,
-    onSave: suspend (String, String, String, Boolean, String, Boolean, String, String, Boolean) -> Result<Unit>,
+    onSave: suspend (String, String, String, Boolean, String, Boolean, String, String, Boolean, Boolean) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
@@ -1159,6 +1161,9 @@ private fun SettingsScreen(
     }
     var overlayGlassEnabled by rememberSaveable(state.config.overlayGlassEnabled) {
         mutableStateOf(state.config.overlayGlassEnabled)
+    }
+    var shortAnswerModeEnabled by rememberSaveable(state.config.shortAnswerModeEnabled) {
+        mutableStateOf(state.config.shortAnswerModeEnabled)
     }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
@@ -1374,6 +1379,25 @@ private fun SettingsScreen(
                     }
                 },
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("选择/判断题简版回答模式", fontWeight = FontWeight.Medium)
+                    Text(
+                        "识别到选择题显示 A-D 方块，判断题左边为正确、右边为错误；只显示约 1 秒，不弹出文字回答",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = shortAnswerModeEnabled,
+                    enabled = !saving,
+                    onCheckedChange = { shortAnswerModeEnabled = it; saved = false },
+                )
+            }
             if (backgroundCaptureEnabled) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -1531,6 +1555,7 @@ private fun SettingsScreen(
                                     screenshotPrompt,
                                     overlayBackgroundColor,
                                     overlayGlassEnabled,
+                                    shortAnswerModeEnabled,
                                 )
                                     .onSuccess { error = null; saved = true; apiKey = "" }
                                     .onFailure { error = it.message ?: "保存失败"; saved = false }

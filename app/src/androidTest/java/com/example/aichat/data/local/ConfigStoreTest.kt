@@ -36,6 +36,7 @@ class ConfigStoreTest {
         assertEquals(DEFAULT_SCREENSHOT_PROMPT, config.screenshotPrompt)
         assertEquals(DEFAULT_OVERLAY_BACKGROUND_COLOR, config.overlayBackgroundColor)
         assertFalse(config.overlayGlassEnabled)
+        assertFalse(config.shortAnswerModeEnabled)
     }
 
     @Test
@@ -48,6 +49,7 @@ class ConfigStoreTest {
             screenshotPrompt = "只回复答案",
             overlayBackgroundColor = "#DDF4E8",
             overlayGlassEnabled = true,
+            shortAnswerModeEnabled = true,
         )
 
         val config = store.read()
@@ -55,6 +57,7 @@ class ConfigStoreTest {
         assertEquals("只回复答案", config.screenshotPrompt)
         assertEquals("#DDF4E8", config.overlayBackgroundColor)
         assertTrue(config.overlayGlassEnabled)
+        assertTrue(config.shortAnswerModeEnabled)
     }
 
     @Test

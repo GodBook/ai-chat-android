@@ -132,15 +132,21 @@ class BackgroundScreenshotService : Service() {
             if (!config.backgroundCaptureEnabled) return@launch
             try {
                 val bitmap = captureManager.capture()
-                val answer = questionProcessor.process(bitmap, config.screenshotPrompt)
-                if (!overlayManager.show(
+                val answer = questionProcessor.process(
+                    bitmap = bitmap,
+                    prompt = config.screenshotPrompt,
+                    shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+                )
+                val shown = if (config.shortAnswerModeEnabled) {
+                    extractShortAnswerIndicator(answer)?.let(overlayManager::showShortAnswer) ?: true
+                } else {
+                    overlayManager.show(
                         answer = answer,
                         backgroundColor = config.overlayBackgroundColor,
                         glassEnabled = config.overlayGlassEnabled,
                     )
-                ) {
-                    notifyStatus(answer)
                 }
+                if (!shown && !config.shortAnswerModeEnabled) notifyStatus(answer)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {

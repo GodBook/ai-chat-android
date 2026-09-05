@@ -385,6 +385,7 @@ class MainViewModel(
         screenshotPrompt: String,
         overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
         overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
+        shortAnswerModeEnabled: Boolean = false,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -419,6 +420,7 @@ class MainViewModel(
                 screenshotPrompt = normalizedScreenshotPrompt,
                 overlayBackgroundColor = normalizeOverlayBackgroundColor(overlayBackgroundColor),
                 overlayGlassEnabled = overlayGlassEnabled,
+                shortAnswerModeEnabled = shortAnswerModeEnabled,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
