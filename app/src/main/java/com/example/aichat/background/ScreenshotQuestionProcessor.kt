@@ -100,7 +100,7 @@ fun extractShortAnswerIndicator(answer: String): ShortAnswerIndicator? {
         return ShortAnswerIndicator.Judgment(value in setOf("正确", "对", "是", "true"))
     }
     val choice = Regex(
-        "(?i)(?:正确选项|正确答案|答案|选择|选项|选)\\s*(?:是|为|选)?\\s*[:：]?\\s*(?:选项\\s*)?([abcd])(?:\\b|[)）。、，,：:.])",
+        "(?i)(?:正确选项|正确答案|答案|选择|选项|选)\\s*(?:是|为|选)?\\s*[:：]?\\s*(?:选项\\s*)?([abcd])",
     ).find(text)
         ?: Regex("(?i)(?:^|[\\n])\\s*[（(]?([abcd])(?:[)）.]|[：:、。](?=\\s|$)|$)").find(text)
     return choice?.groupValues?.last()?.lowercase()?.firstOrNull()?.let {
