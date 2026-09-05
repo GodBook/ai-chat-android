@@ -436,6 +436,12 @@ class MainViewModel(
         configStore.update(current.copy(backgroundCaptureEnabled = enabled))
     }
 
+    /** Persists the compact choice/judgment answer switch immediately. */
+    suspend fun setShortAnswerModeEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        val current = configStore.read()
+        configStore.update(current.copy(shortAnswerModeEnabled = enabled))
+    }
+
     /** Persists color and glass choices as soon as the user selects them. */
     suspend fun setOverlayAppearance(
         backgroundColor: String,

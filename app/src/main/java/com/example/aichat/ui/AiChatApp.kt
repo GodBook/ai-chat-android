@@ -279,6 +279,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                         }
                     },
                     onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
+                    onShortAnswerModeChanged = viewModel::setShortAnswerModeEnabled,
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,
                     onDownloadUpdate = viewModel::downloadUpdate,
@@ -1136,6 +1137,7 @@ private fun SettingsScreen(
     onSave: suspend (String, String, String, Boolean, String, Boolean, String, String, Boolean, Boolean) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
+    onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
@@ -1172,6 +1174,7 @@ private fun SettingsScreen(
     var saving by remember { mutableStateOf(false) }
     var updatingBackgroundCapture by remember { mutableStateOf(false) }
     var updatingOverlayAppearance by remember { mutableStateOf(false) }
+    var updatingShortAnswerMode by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -1394,8 +1397,28 @@ private fun SettingsScreen(
                 }
                 Switch(
                     checked = shortAnswerModeEnabled,
-                    enabled = !saving,
-                    onCheckedChange = { shortAnswerModeEnabled = it; saved = false },
+                    enabled = !saving && !updatingShortAnswerMode,
+                    onCheckedChange = { requested ->
+                        val previous = shortAnswerModeEnabled
+                        shortAnswerModeEnabled = requested
+                        saved = false
+                        updatingShortAnswerMode = true
+                        scope.launch {
+                            try {
+                                onShortAnswerModeChanged(requested)
+                                    .onSuccess {
+                                        error = null
+                                        saved = true
+                                    }
+                                    .onFailure {
+                                        shortAnswerModeEnabled = previous
+                                        error = it.message ?: "简版回答设置保存失败"
+                                    }
+                            } finally {
+                                updatingShortAnswerMode = false
+                            }
+                        }
+                    },
                 )
             }
             if (backgroundCaptureEnabled) {
