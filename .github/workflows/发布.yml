@@ -91,4 +91,10 @@ jobs:
 
       - name: 发布 GitHub Release
         shell: bash
-        run: gh release create "$RELEASE_TAG" "dist/$APK_NAME" dist/latest.json --title "AI BOTOY $VERSION_NAME" --notes-file dist/release-notes.md
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "dist/$APK_NAME" dist/latest.json --clobber
+            gh release edit "$RELEASE_TAG" --title "AI BOTOY $VERSION_NAME" --notes-file dist/release-notes.md
+          else
+            gh release create "$RELEASE_TAG" "dist/$APK_NAME" dist/latest.json --title "AI BOTOY $VERSION_NAME" --notes-file dist/release-notes.md
+          fi
