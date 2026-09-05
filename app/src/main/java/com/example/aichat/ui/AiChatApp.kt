@@ -136,6 +136,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
+import com.example.aichat.BuildConfig
 import com.example.aichat.background.BackgroundScreenshotManager
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
@@ -1273,7 +1274,7 @@ private fun SettingsScreen(
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("连接设置", fontWeight = FontWeight.SemiBold)
-                        Text("AI BOTOY · v1.4.3", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("AI BOTOY · v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {

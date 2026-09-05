@@ -12,6 +12,7 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 - 长按 AI 回复，使用 Android 系统选文工具精确选择文字
 - 从系统相册选图，以 Base64 data URL 发送给支持视觉输入的模型
 - 可选开启后台音量下键截屏问答：截取当前屏幕、创建独立会话发送给 AI，并用类似 QQ 消息通知的横幅在屏幕顶部显示回答
+- 可在设置中开启选择/判断题简版回答模式：选择题显示正确选项所在的 A-D 灰色方块，判断题左侧为正确、右侧为错误，持续约 1 秒且不弹出文字回答
 - 顶部悬浮回答保持固定大小，可上下滑动查看完整回答、左右滑动关闭，也会在显示一段时间后自动消失
 - 可为悬浮回答选择浅蓝、薄荷、杏橙、玫瑰或雾灰背景，并可开启半透明毛玻璃效果
 - 可自定义截图随附的 AI 提示词，并可一键恢复默认提示词
@@ -32,6 +33,8 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 悬浮回答背景可在设置页独立选择，点选颜色或切换毛玻璃后会立即保存，并从下一次悬浮回答开始生效。Android 12 及以上开启“半透明毛玻璃”时会使用系统背景模糊；Android 10 和 11 会自动降级为半透明背景。
 
 设置页的“立即测试截图”可以在不切换应用的情况下检查截图、AI 请求和悬浮回答链路。Android 10 的屏幕捕获授权绑定当前应用进程；应用进程被系统回收后，需要回到设置重新授权。Android 11 及以上没有这一限制，但系统或厂商的省电设置仍可能暂停无障碍服务，如音量键没有响应，请确认系统设置中的“AI BOTOY”无障碍服务仍为开启状态。
+
+选择/判断题简版回答模式可在后台截图设置区域单独开启。识别到选择题时，屏幕顶端从左到右对应 A、B、C、D；识别到判断题时，左侧表示正确、右侧表示错误。该模式只显示灰色方块约 1 秒，不显示文字悬浮回答。
 
 应用由手机直接连接所填写的模型服务，Base URL 必须使用 HTTPS。API Key 只会加密保存在本机，但会在请求时发送给该服务，请仅使用可信接口。
 
@@ -72,11 +75,11 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.3`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.4`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
 
 ```powershell
-git tag v1.4.3
-git push origin v1.4.3
+git tag v1.4.4
+git push origin v1.4.4
 ```
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
@@ -94,11 +97,11 @@ git push origin v1.4.3
 
 ```json
 {
-  "versionCode": 10,
-  "versionName": "1.4.3",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.3/ai-botoy-1.4.3.apk",
+  "versionCode": 11,
+  "versionName": "1.4.4",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.4/ai-botoy-1.4.4.apk",
   "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "releaseNotes": "修复悬浮回答颜色与毛玻璃选项未立即生效的问题"
+  "releaseNotes": "修复选择/判断题简版回答模式在无障碍截图流程中未生效的问题"
 }
 ```
 

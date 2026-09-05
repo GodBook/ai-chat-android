@@ -158,8 +158,18 @@ class VolumeDownAccessibilityService : AccessibilityService() {
                 return@launch
             }
             try {
-                val answer = questionProcessor.process(bitmap, config.screenshotPrompt)
-                showFeedback(answer, config)
+                val answer = questionProcessor.process(
+                    bitmap = bitmap,
+                    prompt = config.screenshotPrompt,
+                    shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+                )
+                if (config.shortAnswerModeEnabled) {
+                    // Compact mode intentionally has no text bubble. Only a recognized answer
+                    // gets a one-second indicator at the top edge of the screen.
+                    extractShortAnswerIndicator(answer)?.let(overlayManager::showShortAnswer)
+                } else {
+                    showFeedback(answer, config)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
