@@ -32,6 +32,7 @@ import com.example.aichat.data.update.UpdateDownloadState
 import com.example.aichat.data.update.UpdateManifestParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URI
 import java.util.concurrent.atomic.AtomicLong
@@ -304,6 +306,28 @@ class MainViewModel(
                 throw cancelled
             } catch (failure: Throwable) {
                 if (deletingSelected) restoreComposerImages(draftImages, id, generation)
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    /** Builds an export off the UI thread, then lets the screen open the system share sheet. */
+    fun exportConversation(id: String, onReady: (title: String, content: String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val conversation = repository.getConversation(id)
+                    ?: throw IllegalArgumentException("聊天不存在")
+                val messages = repository.observeMessages(id).first()
+                if (messages.isEmpty()) {
+                    throw IllegalArgumentException("当前聊天还没有消息")
+                }
+                val content = withContext(Dispatchers.Default) {
+                    ChatExportFormatter.format(conversation.title, messages)
+                }
+                onReady(conversation.title, content)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
                 transientMessage.value = failure.userFacingMessage()
             }
         }
