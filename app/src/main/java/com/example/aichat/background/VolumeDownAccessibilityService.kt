@@ -19,6 +19,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import kotlin.coroutines.coroutineContext
 
 /** Receives global volume-down key events after the user enables this accessibility service. */
 class VolumeDownAccessibilityService : AccessibilityService() {
@@ -30,9 +33,13 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     @Volatile private var enabled = false
     @Volatile private var latestConfig = ProviderConfig()
     private var configJob: Job? = null
-    private var captureJob: Job? = null
-    private var screenshotPending = false
+    @Volatile private var captureJob: Job? = null
+    @Volatile private var screenshotPending = false
     private var lastTriggerAt = 0L
+    private val captureLock = Any()
+    private val screenshotExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "ai-chat-screenshot").apply { isDaemon = true }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -75,8 +82,15 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     /** Handles both the volume key and the settings screen's manual test action. */
     internal fun captureFromTrigger(): Boolean {
-        if (!enabled || screenshotPending || captureJob?.isActive == true) return false
+        if (!enabled) return false
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            synchronized(captureLock) {
+                if (screenshotPending || captureJob != null) return false
+                // Keep the reservation until processScreenshot has installed its Job. This
+                // closes the callback-to-processing window where a second key press could start
+                // another system screenshot while the first bitmap was still being scheduled.
+                screenshotPending = true
+            }
             requestAccessibilityScreenshot()
             true
         } else {
@@ -93,36 +107,40 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.R)
     private fun requestAccessibilityScreenshot() {
-        screenshotPending = true
         overlayManager.dismiss()
         try {
             @Suppress("DEPRECATION")
             takeScreenshot(
                 Display.DEFAULT_DISPLAY,
-                mainExecutor,
+                screenshotExecutor,
                 object : TakeScreenshotCallback {
                     override fun onSuccess(screenshot: ScreenshotResult) {
-                        screenshotPending = false
                         if (!serviceJob.isActive) {
                             screenshot.hardwareBuffer.close()
+                            releaseCaptureReservation()
                             return
                         }
                         val bitmap = runCatching { screenshot.toSoftwareBitmap() }
                             .getOrElse {
-                                showFeedback(it.message ?: "无法读取屏幕截图")
+                                releaseCaptureReservation()
+                                serviceScope.launch {
+                                    showFeedback(it.message ?: "无法读取屏幕截图")
+                                }
                                 return
                             }
                         processScreenshot(bitmap)
                     }
 
                     override fun onFailure(errorCode: Int) {
-                        screenshotPending = false
-                        showFeedback(screenshotErrorMessage(errorCode))
+                        releaseCaptureReservation()
+                        serviceScope.launch {
+                            showFeedback(screenshotErrorMessage(errorCode))
+                        }
                     }
                 },
             )
         } catch (failure: Throwable) {
-            screenshotPending = false
+            releaseCaptureReservation()
             showFeedback(failure.message ?: "系统截图失败")
         }
     }
@@ -146,15 +164,21 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     private fun processScreenshot(bitmap: Bitmap) {
         val job = serviceScope.launch(start = CoroutineStart.LAZY) {
-            val config = runCatching { app.container.configStore.read() }.getOrElse {
+            val config = try {
+                app.container.configStore.read()
+            } catch (cancelled: CancellationException) {
                 bitmap.recycle()
-                showFeedback("无法读取后台截图设置")
-                captureJob = null
+                coroutineContext[Job]?.let(::clearCaptureJob)
+                throw cancelled
+            } catch (_: Throwable) {
+                bitmap.recycle()
+                if (serviceJob.isActive) showFeedback("无法读取后台截图设置")
+                coroutineContext[Job]?.let(::clearCaptureJob)
                 return@launch
             }
             if (!config.backgroundCaptureEnabled) {
                 bitmap.recycle()
-                captureJob = null
+                coroutineContext[Job]?.let(::clearCaptureJob)
                 return@launch
             }
             try {
@@ -175,11 +199,30 @@ class VolumeDownAccessibilityService : AccessibilityService() {
             } catch (failure: Throwable) {
                 showFeedback(failure.message ?: "截屏问答失败", config)
             } finally {
-                captureJob = null
+                coroutineContext[Job]?.let(::clearCaptureJob)
             }
         }
-        captureJob = job
-        job.start()
+        synchronized(captureLock) {
+            captureJob = job
+            screenshotPending = false
+        }
+        if (!job.start()) {
+            // A service destroyed between launch and start still owns this bitmap.
+            bitmap.recycle()
+            clearCaptureJob(job)
+        }
+    }
+
+    private fun releaseCaptureReservation() {
+        synchronized(captureLock) {
+            screenshotPending = false
+        }
+    }
+
+    private fun clearCaptureJob(job: Job) {
+        synchronized(captureLock) {
+            if (captureJob === job) captureJob = null
+        }
     }
 
     private fun showFeedback(message: String, config: ProviderConfig? = null) {
@@ -209,9 +252,13 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         enabled = false
-        screenshotPending = false
-        captureJob?.cancel()
+        val runningJob = synchronized(captureLock) {
+            screenshotPending = false
+            captureJob.also { captureJob = null }
+        }
+        runningJob?.cancel()
         configJob?.cancel()
+        screenshotExecutor.shutdownNow()
         overlayManager.dismiss()
         BackgroundScreenshotManager.detach(this)
         serviceJob.cancel()

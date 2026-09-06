@@ -3,8 +3,10 @@ package com.example.aichat.data.repository
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
+import com.example.aichat.data.model.MessageStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
 
 interface ChatRepository {
     /** All saved chats, ordered by most recently changed. */
@@ -21,6 +23,14 @@ interface ChatRepository {
 
     /** All messages across chats, used for list previews and migration-safe recovery. */
     fun observeAllMessages(): Flow<List<ChatMessage>> = messages
+
+    /** Newest message per conversation, used by the conversation list. */
+    fun observeConversationPreviews(): Flow<List<ChatMessage>> = observeAllMessages()
+
+    /** Whether any conversation currently has an assistant response in flight. */
+    fun observeAnyWorking(): Flow<Boolean> = observeAllMessages().map { rows ->
+        rows.any { it.status == MessageStatus.SENDING || it.status == MessageStatus.STREAMING }
+    }
 
     fun observeMessages(): Flow<List<ChatMessage>> = messages
 

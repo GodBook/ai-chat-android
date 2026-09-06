@@ -12,6 +12,7 @@ import androidx.room.ColumnInfo
         Index(value = ["createdAt"]),
         Index(value = ["requestId"]),
         Index(value = ["conversationId"]),
+        Index(value = ["conversationId", "createdAt", "id"]),
     ],
 )
 data class ChatMessageEntity(

@@ -17,10 +17,11 @@ import com.example.aichat.AiChatApplication
 import com.example.aichat.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.launch
 
 /** Foreground worker that captures a frame and sends it through the normal chat repository. */
@@ -74,14 +75,14 @@ class BackgroundScreenshotService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action == BackgroundScreenshotManager.ACTION_CAPTURE_NOW &&
-            !captureManager.hasProjection && !hasNewProjectionGrant &&
-            projectionJob?.isActive != true
-        ) {
-            notifyStatus("后台进程已重启，请回到设置重新授权屏幕捕获")
-            // A MediaProjection grant is tied to the current process. Keep the switch enabled so
-            // the user can renew the grant from Settings instead of silently turning it off.
-            return START_STICKY
+        if (!captureManager.hasProjection && !hasNewProjectionGrant && projectionJob?.isActive != true) {
+            if (intent?.action == BackgroundScreenshotManager.ACTION_CAPTURE_NOW) {
+                notifyStatus("后台进程已重启，请回到设置重新授权屏幕捕获")
+            }
+            // A MediaProjection grant is tied to the current process. There is no reason to keep
+            // an empty foreground service alive; the next grant or capture request starts it again.
+            stopSelf()
+            return START_NOT_STICKY
         }
         applyProjectionGrant(intent)
         if (intent?.action == BackgroundScreenshotManager.ACTION_CAPTURE_NOW) requestCapture()
@@ -115,59 +116,72 @@ class BackgroundScreenshotService : Service() {
         val projectionData = intent?.parcelableIntentExtra(BackgroundScreenshotManager.EXTRA_PROJECTION_DATA)
         if (resultCode == Int.MIN_VALUE || projectionData == null) return
         projectionJob?.cancel()
-        projectionJob = serviceScope.launch {
-            runCatching { captureManager.setProjection(resultCode, projectionData) }
-                .onFailure { notifyStatus("屏幕捕获授权无效，请重新授权") }
+        val job = serviceScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                captureManager.setProjection(resultCode, projectionData)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                notifyStatus("屏幕捕获授权无效，请重新授权")
+            } finally {
+                if (projectionJob === coroutineContext[Job]) projectionJob = null
+            }
         }
+        projectionJob = job
+        if (!job.start() && projectionJob === job) projectionJob = null
     }
 
     private fun requestCapture() {
         if (captureJob?.isActive == true) return
-        captureJob = serviceScope.launch {
-            projectionJob?.join()
-            val config = runCatching { app.container.configStore.read() }.getOrElse {
-                notifyStatus("无法读取后台截图设置")
-                return@launch
-            }
-            if (!config.backgroundCaptureEnabled) return@launch
+        val job = serviceScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val bitmap = captureManager.capture()
-                val answer = questionProcessor.process(
-                    bitmap = bitmap,
-                    prompt = config.screenshotPrompt,
-                    shortAnswerModeEnabled = config.shortAnswerModeEnabled,
-                )
-                val shown = if (config.shortAnswerModeEnabled) {
-                    extractShortAnswerIndicator(answer)?.let(overlayManager::showShortAnswer) ?: true
-                } else {
-                    overlayManager.show(
-                        answer = answer,
-                        backgroundColor = config.overlayBackgroundColor,
-                        glassEnabled = config.overlayGlassEnabled,
-                    )
+                projectionJob?.join()
+                val config = try {
+                    app.container.configStore.read()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    notifyStatus("无法读取后台截图设置")
+                    return@launch
                 }
-                if (!shown && !config.shortAnswerModeEnabled) notifyStatus(answer)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Throwable) {
-                notifyStatus(failure.message ?: "截屏问答失败")
+                if (!config.backgroundCaptureEnabled) return@launch
+                try {
+                    val bitmap = captureManager.capture()
+                    val answer = questionProcessor.process(
+                        bitmap = bitmap,
+                        prompt = config.screenshotPrompt,
+                        shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+                    )
+                    val shown = if (config.shortAnswerModeEnabled) {
+                        extractShortAnswerIndicator(answer)?.let(overlayManager::showShortAnswer) ?: true
+                    } else {
+                        overlayManager.show(
+                            answer = answer,
+                            backgroundColor = config.overlayBackgroundColor,
+                            glassEnabled = config.overlayGlassEnabled,
+                        )
+                    }
+                    if (!shown && !config.shortAnswerModeEnabled) notifyStatus(answer)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    notifyStatus(failure.message ?: "截屏问答失败")
+                }
             } finally {
-                captureJob = null
+                if (captureJob === coroutineContext[Job]) captureJob = null
             }
         }
+        captureJob = job
+        if (!job.start() && captureJob === job) captureJob = null
     }
 
     private fun startForegroundCompat() {
         val notification = buildNotification("后台截图问答已开启")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                FOREGROUND_NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
-            )
-        } else {
-            startForeground(FOREGROUND_NOTIFICATION_ID, notification)
-        }
+        startForeground(
+            FOREGROUND_NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+        )
     }
 
     private fun notifyStatus(message: String) {
@@ -203,7 +217,6 @@ class BackgroundScreenshotService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(

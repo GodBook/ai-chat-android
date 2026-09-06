@@ -1,7 +1,9 @@
 package com.example.aichat.ui
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.os.Build
 import android.text.format.DateUtils
 import android.widget.Toast
@@ -34,6 +36,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -101,6 +104,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -128,6 +132,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -146,7 +151,9 @@ import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.model.OVERLAY_COLOR_PRESETS
 import com.example.aichat.data.update.InstallPreparation
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.io.File
 
 private object Routes {
@@ -154,6 +161,16 @@ private object Routes {
     const val CHAT = "chat"
     const val SETTINGS = "settings"
 }
+
+private const val STREAM_SCROLL_DEBOUNCE_MS = 120L
+
+private fun hasPostNotificationsPermission(context: android.content.Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+        PackageManager.PERMISSION_GRANTED
+
+private fun canRequestPostNotificationsPermission(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
 @Composable
 fun AiChatApp(viewModel: MainViewModel) {
@@ -581,18 +598,66 @@ private fun ChatScreen(
     var draft by rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var shouldFollowTail by remember { mutableStateOf(true) }
+    var automaticScrollDepth by remember { mutableIntStateOf(0) }
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri -> uri?.let(onImportImage) }
-    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(state.selectedConversationId) {
-        draft = ""
-        if (state.messages.isNotEmpty()) listState.scrollToItem(state.messages.lastIndex)
+    suspend fun scrollToTail(animated: Boolean) {
+        automaticScrollDepth += 1
+        try {
+            if (state.messages.isEmpty()) return
+            if (animated) {
+                listState.animateScrollToItem(state.messages.lastIndex)
+            } else {
+                listState.scrollToItem(state.messages.lastIndex)
+            }
+        } finally {
+            automaticScrollDepth = (automaticScrollDepth - 1).coerceAtLeast(0)
+        }
     }
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text) {
-        if (state.messages.isNotEmpty()) {
-            scope.launch { listState.animateScrollToItem(state.messages.lastIndex) }
+
+    LaunchedEffect(listState) {
+        var wasAutomaticallyScrolling = false
+        snapshotFlow {
+            Triple(
+                listState.isScrollInProgress,
+                listState.isNearBottom(),
+                automaticScrollDepth > 0,
+            )
+        }.collect { (scrolling, nearBottom, automaticallyScrolling) ->
+            // Programmatic tail scrolling also sets isScrollInProgress. Ignore those frames,
+            // but sample the final position when an automatic animation finishes or is
+            // interrupted by a user drag.
+            if (!automaticallyScrolling && (scrolling || wasAutomaticallyScrolling)) {
+                shouldFollowTail = nearBottom
+            }
+            wasAutomaticallyScrolling = automaticallyScrolling
+        }
+    }
+    LaunchedEffect(state.selectedConversationId) {
+        shouldFollowTail = true
+        draft = ""
+        if (state.messages.isNotEmpty()) scrollToTail(animated = false)
+    }
+    LaunchedEffect(state.messages.size) {
+        val followTail = shouldFollowTail
+        if (state.messages.isNotEmpty() && followTail && shouldFollowTail) {
+            scrollToTail(animated = true)
+        }
+    }
+    LaunchedEffect(
+        state.messages.lastOrNull()?.id,
+        state.messages.lastOrNull()?.text?.length,
+        state.messages.lastOrNull()?.status,
+    ) {
+        if (state.messages.isEmpty()) return@LaunchedEffect
+        val followTail = shouldFollowTail
+        if (!followTail) return@LaunchedEffect
+        delay(STREAM_SCROLL_DEBOUNCE_MS)
+        if (shouldFollowTail) {
+            scrollToTail(animated = false)
         }
     }
     LaunchedEffect(state.draftToRestore) {
@@ -701,6 +766,18 @@ private fun ChatScreen(
         )
     }
 }
+
+private fun LazyListState.isNearBottom(totalItems: Int): Boolean {
+    if (totalItems == 0) return true
+    val visibleItems = layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty()) return true
+    val lastVisible = visibleItems.maxByOrNull { it.index } ?: return true
+    if (lastVisible.index < totalItems - 1) return false
+    val remainingPixels = layoutInfo.viewportEndOffset - (lastVisible.offset + lastVisible.size)
+    return remainingPixels <= 160
+}
+
+private fun LazyListState.isNearBottom(): Boolean = isNearBottom(layoutInfo.totalItemsCount)
 
 @Composable
 private fun EmptyConversation(modifier: Modifier = Modifier) {
@@ -1207,6 +1284,8 @@ private fun SettingsScreen(
     var updatingShortAnswerMode by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
+    var pendingBackgroundEnable by remember { mutableStateOf<Boolean?>(null) }
+    var pendingBackgroundPrevious by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1230,8 +1309,61 @@ private fun SettingsScreen(
     } else {
         BackgroundScreenshotManager.hasActiveProjection
     }
+    // Android 11+ captures through AccessibilityService and does not run the
+    // foreground worker. Notification permission is only a prerequisite for
+    // the Android 10 fallback, which uses a foreground service.
+    val notificationPermissionRequired = !usesAccessibilityScreenshot
+    val notificationPermissionGranted = !notificationPermissionRequired ||
+        hasPostNotificationsPermission(context)
     val backgroundPermissionsReady = screenshotPermissionGranted &&
-        overlayPermissionGranted && accessibilityPermissionGranted
+        overlayPermissionGranted && accessibilityPermissionGranted && notificationPermissionGranted
+
+    fun persistBackgroundCaptureChange(requested: Boolean, previous: Boolean) {
+        backgroundCaptureEnabled = requested
+        saved = false
+        updatingBackgroundCapture = true
+        scope.launch {
+            try {
+                onBackgroundCaptureChanged(requested)
+                    .onSuccess {
+                        error = null
+                        saved = true
+                    }
+                    .onFailure {
+                        backgroundCaptureEnabled = previous
+                        error = it.message ?: "后台截图设置保存失败"
+                    }
+            } finally {
+                updatingBackgroundCapture = false
+            }
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val requested = pendingBackgroundEnable
+        val previous = pendingBackgroundPrevious
+        pendingBackgroundEnable = null
+        if (requested == true && !granted) {
+            backgroundCaptureEnabled = previous
+            error = "需要允许通知，才能显示 Android 10 后台截图状态和回答"
+        } else if (requested != null) {
+            persistBackgroundCaptureChange(requested, previous)
+        }
+    }
+
+    fun requestBackgroundCaptureChange(requested: Boolean) {
+        val previous = backgroundCaptureEnabled
+        if (requested && notificationPermissionRequired && canRequestPostNotificationsPermission() &&
+            !notificationPermissionGranted) {
+            pendingBackgroundEnable = requested
+            pendingBackgroundPrevious = previous
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            persistBackgroundCaptureChange(requested, previous)
+        }
+    }
 
     val launchInstallIntent: (android.content.Intent) -> Unit = { intent ->
         try {
@@ -1364,27 +1496,7 @@ private fun SettingsScreen(
                 Switch(
                     checked = backgroundCaptureEnabled,
                     enabled = !saving && !updatingBackgroundCapture,
-                    onCheckedChange = { requested ->
-                        val previous = backgroundCaptureEnabled
-                        backgroundCaptureEnabled = requested
-                        saved = false
-                        updatingBackgroundCapture = true
-                        scope.launch {
-                            try {
-                                onBackgroundCaptureChanged(requested)
-                                    .onSuccess {
-                                        error = null
-                                        saved = true
-                                    }
-                                    .onFailure {
-                                        backgroundCaptureEnabled = previous
-                                        error = it.message ?: "后台截图设置保存失败"
-                                    }
-                            } finally {
-                                updatingBackgroundCapture = false
-                            }
-                        }
-                    },
+                    onCheckedChange = ::requestBackgroundCaptureChange,
                 )
             }
             OverlayAppearanceSettings(
@@ -1517,7 +1629,7 @@ private fun SettingsScreen(
                         if (usesAccessibilityScreenshot) {
                             "系统截图与音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}"
                         } else {
-                            "屏幕捕获：${if (screenshotPermissionGranted) "已授权" else "未授权"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}"
+                            "屏幕捕获：${if (screenshotPermissionGranted) "已授权" else "未授权"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；通知：${if (notificationPermissionGranted) "已允许" else "未允许"}"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (backgroundPermissionsReady) {
@@ -1560,9 +1672,22 @@ private fun SettingsScreen(
                     }
                     OutlinedButton(
                         onClick = onCaptureNow,
+                        enabled = backgroundPermissionsReady && !updatingBackgroundCapture,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("立即测试截图")
+                    }
+                    if (notificationPermissionRequired && canRequestPostNotificationsPermission() &&
+                        !notificationPermissionGranted) {
+                        OutlinedButton(
+                            onClick = {
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            },
+                            enabled = !saving && !updatingBackgroundCapture,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("允许后台通知")
+                        }
                     }
                 }
             }

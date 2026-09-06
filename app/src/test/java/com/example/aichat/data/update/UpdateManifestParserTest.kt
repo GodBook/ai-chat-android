@@ -70,4 +70,36 @@ class UpdateManifestParserTest {
 
         assertEquals(UpdateErrorKind.INVALID_URL, failure.kind)
     }
+
+    @Test
+    fun `trims release notes before applying the size limit`() {
+        val info = UpdateManifestParser.validate(
+            AppUpdateInfo(
+                versionCode = 2,
+                versionName = "1.1",
+                downloadUrl = "https://updates.example.test/app.apk",
+                sha256 = hash,
+                releaseNotes = " ".repeat(40_000) + "修复问题" + " ".repeat(40_000),
+            ),
+        )
+
+        assertEquals("修复问题", info.releaseNotes)
+    }
+
+    @Test
+    fun `rejects release notes that remain too large after trimming`() {
+        val failure = assertThrows(AppUpdateException::class.java) {
+            UpdateManifestParser.validate(
+                AppUpdateInfo(
+                    versionCode = 2,
+                    versionName = "1.1",
+                    downloadUrl = "https://updates.example.test/app.apk",
+                    sha256 = hash,
+                    releaseNotes = "x".repeat(32_001),
+                ),
+            )
+        }
+
+        assertEquals(UpdateErrorKind.INVALID_MANIFEST, failure.kind)
+    }
 }

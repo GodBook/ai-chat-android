@@ -3,6 +3,7 @@
     android:accessibilityFlags="flagDefault|flagRequestFilterKeyEvents"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:canRequestFilterKeyEvents="true"
+    android:canTakeScreenshot="true"
     android:description="@string/volume_screenshot_accessibility_description"
     android:notificationTimeout="100"
     android:settingsActivity="com.example.aichat.MainActivity" />

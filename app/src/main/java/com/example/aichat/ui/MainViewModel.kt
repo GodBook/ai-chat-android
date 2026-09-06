@@ -31,13 +31,17 @@ import com.example.aichat.data.update.UpdateDownloadProgress
 import com.example.aichat.data.update.UpdateDownloadState
 import com.example.aichat.data.update.UpdateManifestParser
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -78,7 +82,14 @@ data class MainUiState(
 
 private data class ConversationSnapshot(
     val conversations: List<ChatConversation>,
-    val allMessages: List<ChatMessage>,
+    val previews: List<ChatMessage>,
+    val selectedId: String?,
+    val selectedMessages: List<ChatMessage>,
+    val isAnyWorking: Boolean,
+)
+
+private data class ConversationSelection(
+    val conversations: List<ChatConversation>,
     val selectedId: String?,
 )
 
@@ -109,14 +120,38 @@ class MainViewModel(
     private val updateState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
     private val conversationGeneration = AtomicLong(0)
 
-    private val conversationSnapshot: Flow<ConversationSnapshot> = combine(
+    private val conversationSelection: Flow<ConversationSelection> = combine(
         repository.conversations,
-        repository.observeAllMessages(),
         selectedConversationId,
-    ) { conversations, allMessages, selectedId ->
+    ) { conversations, selectedId ->
         val validSelectedId = selectedId?.takeIf { candidate -> conversations.any { it.id == candidate } }
             ?: conversations.firstOrNull()?.id
-        ConversationSnapshot(conversations, allMessages, validSelectedId)
+        ConversationSelection(conversations, validSelectedId)
+    }.distinctUntilChanged()
+
+    /**
+     * Keep the high-frequency stream updates scoped to the selected chat. The
+     * conversation list only needs one preview row per chat, and the global
+     * working flag is a cheap EXISTS query.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val conversationSnapshot: Flow<ConversationSnapshot> = conversationSelection.flatMapLatest { selection ->
+        val selectedMessages = selection.selectedId?.let { repository.observeMessages(it) }
+            ?: flowOf(emptyList())
+        combine(
+            flowOf(selection.conversations),
+            repository.observeConversationPreviews(),
+            selectedMessages,
+            repository.observeAnyWorking(),
+        ) { conversations, previews, messages, anyWorking ->
+            ConversationSnapshot(
+                conversations = conversations,
+                previews = previews,
+                selectedId = selection.selectedId,
+                selectedMessages = messages,
+                isAnyWorking = anyWorking,
+            )
+        }
     }
 
     private val settingsSnapshot: Flow<SettingsSnapshot> = combine(
@@ -135,14 +170,7 @@ class MainViewModel(
         settingsSnapshot,
         composerSnapshot,
     ) { conversationsState, settings, composer ->
-        val selectedMessages = conversationsState.allMessages.filter {
-            it.conversationId == conversationsState.selectedId
-        }
-        val previews = conversationsState.allMessages
-            .groupBy { it.conversationId }
-            .mapValues { (_, rows) ->
-                rows.maxWithOrNull(compareBy<ChatMessage> { it.createdAt }.thenBy { it.id })!!
-            }
+        val previews = conversationsState.previews.associateBy { it.conversationId }
         MainUiState(
             conversations = conversationsState.conversations,
             conversationPreviews = previews,
@@ -151,11 +179,11 @@ class MainViewModel(
                 .firstOrNull { it.id == conversationsState.selectedId }
                 ?.title
                 ?: DEFAULT_CONVERSATION_TITLE,
-            messages = selectedMessages,
+            messages = conversationsState.selectedMessages,
             config = settings.config,
             selectedImagePaths = composer.images,
-            isWorking = selectedMessages.any { it.isGenerating() },
-            isAnyWorking = conversationsState.allMessages.any { it.isGenerating() },
+            isWorking = conversationsState.selectedMessages.any { it.isGenerating() },
+            isAnyWorking = conversationsState.isAnyWorking,
             message = composer.message,
             draftToRestore = composer.draft,
             updateManifestUrl = settings.updateManifestUrl.ifBlank { BuildConfig.UPDATE_MANIFEST_URL },

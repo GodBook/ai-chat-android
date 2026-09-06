@@ -15,6 +15,7 @@ import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.network.OpenAiCompatibleClient
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -102,6 +103,28 @@ class DefaultChatRepositoryConversationTest {
         assertEquals(1, database.chatMessageDao().getForConversation(second.id).size)
         assertFalse(firstImage.exists())
         assertTrue(secondImage.exists())
+    }
+
+    @Test
+    fun conversationPreviewsOnlyExposeTheNewestMessage() = runBlocking {
+        val first = repository.createConversation("第一段聊天")
+        val second = repository.createConversation("第二段聊天")
+        database.chatMessageDao().insert(
+            message("first-old", first.id, createTestImage()).copy(createdAt = 10L),
+        )
+        database.chatMessageDao().insert(
+            message("first-new", first.id, createTestImage()).copy(createdAt = 20L),
+        )
+        database.chatMessageDao().insert(
+            message("second-only", second.id, createTestImage()).copy(createdAt = 15L),
+        )
+
+        val previews = repository.observeConversationPreviews().first()
+
+        assertEquals(
+            mapOf(first.id to "first-new", second.id to "second-only"),
+            previews.associate { it.conversationId to it.id },
+        )
     }
 
     private fun createTestImage(): File {

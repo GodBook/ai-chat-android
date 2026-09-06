@@ -65,6 +65,11 @@ object UpdateManifestParser {
             }
             ?.trim()
             .orEmpty()
+            .also { notes ->
+                if (notes.length > MAX_RELEASE_NOTES_LENGTH) {
+                    throw invalid("更新清单中的 releaseNotes 过长")
+                }
+            }
 
         return AppUpdateInfo(
             versionCode = versionCode,
@@ -81,11 +86,15 @@ object UpdateManifestParser {
         if (info.versionName.trim().isEmpty()) throw invalid("更新版本名称不能为空")
         validateUrl(info.downloadUrl, requireHttps)
         validateSha256(info.sha256)
+        val normalizedReleaseNotes = info.releaseNotes.trim()
+        if (normalizedReleaseNotes.length > MAX_RELEASE_NOTES_LENGTH) {
+            throw invalid("更新清单中的 releaseNotes 过长")
+        }
         return info.copy(
             versionName = info.versionName.trim(),
             downloadUrl = info.downloadUrl.trim(),
             sha256 = info.sha256.trim().lowercase(Locale.ROOT),
-            releaseNotes = info.releaseNotes.trim(),
+            releaseNotes = normalizedReleaseNotes,
         )
     }
 
@@ -148,4 +157,5 @@ object UpdateManifestParser {
         AppUpdateException(UpdateErrorKind.INVALID_MANIFEST, message)
 
     private val SHA256_PATTERN = Regex("[0-9a-f]{64}")
+    private const val MAX_RELEASE_NOTES_LENGTH = 32_000
 }

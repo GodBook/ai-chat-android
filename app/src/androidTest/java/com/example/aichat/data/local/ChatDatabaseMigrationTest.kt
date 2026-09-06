@@ -75,7 +75,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3)
             .build()
         roomDatabase = migrated
 
@@ -121,7 +121,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3)
             .build()
         roomDatabase = migrated
 

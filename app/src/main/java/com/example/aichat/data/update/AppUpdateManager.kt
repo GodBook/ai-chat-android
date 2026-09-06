@@ -179,6 +179,37 @@ class AppUpdateManager(
             throw AppUpdateException(UpdateErrorKind.IO, "无法创建更新缓存目录")
         }
         val target = File(directory, "ai-chat-${validated.versionCode}.apk")
+        // Keep the target and its possible recovery backup while a replacement is in flight.
+        cleanupUpdateCache(keep = setOf(target), keepBackupsFor = setOf(target))
+        if (target.isFile && target.length() in 1..MAX_APK_BYTES) {
+            val cached = try {
+                val expectedHash = validated.sha256.lowercase(Locale.ROOT)
+                val actualHash = sha256File(target)
+                if (!MessageDigest.isEqual(
+                        actualHash.toByteArray(Charsets.US_ASCII),
+                        expectedHash.toByteArray(Charsets.US_ASCII),
+                    )
+                ) {
+                    null
+                } else {
+                    validateDownloadedPackage(target, validated)
+                    target
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
+            if (cached != null) {
+                onProgress(
+                    UpdateDownloadProgress(
+                        downloadedBytes = cached.length(),
+                        totalBytes = cached.length(),
+                    ),
+                )
+                return@withContext cached
+            }
+        }
         // Some Android PackageManager implementations only inspect files ending in .apk.
         val partial = File.createTempFile("ai-chat-update-", ".download.apk", directory)
         try {
@@ -201,9 +232,30 @@ class AppUpdateManager(
                         it.code,
                     )
                     val total = body.contentLength().takeIf { length -> length >= 0L }
+                    if (total != null && total > MAX_APK_BYTES) {
+                        throw AppUpdateException(UpdateErrorKind.IO, "更新 APK 超过大小限制")
+                    }
                     val digest = MessageDigest.getInstance("SHA-256")
                     var downloaded = 0L
-                    onProgress(UpdateDownloadProgress(downloadedBytes = 0L, totalBytes = total))
+                    var lastProgressAt = 0L
+                    var lastProgressBytes = 0L
+
+                    suspend fun emitProgress(force: Boolean = false) {
+                        val now = System.nanoTime() / NANOS_PER_MILLISECOND
+                        val enoughTime = now - lastProgressAt >= PROGRESS_INTERVAL_MS
+                        val enoughBytes = downloaded - lastProgressBytes >= PROGRESS_MIN_DELTA_BYTES
+                        if (!force && !enoughTime && !enoughBytes) return
+                        onProgress(
+                            UpdateDownloadProgress(
+                                downloadedBytes = downloaded,
+                                totalBytes = total,
+                            ),
+                        )
+                        lastProgressAt = now
+                        lastProgressBytes = downloaded
+                    }
+
+                    emitProgress(force = true)
                     body.byteStream().use { input ->
                         FileOutputStream(partial).use { output ->
                             val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
@@ -211,17 +263,16 @@ class AppUpdateManager(
                                 val read = input.read(buffer)
                                 if (read < 0) break
                                 if (read == 0) continue
+                                if (downloaded + read.toLong() > MAX_APK_BYTES) {
+                                    throw AppUpdateException(UpdateErrorKind.IO, "更新 APK 超过大小限制")
+                                }
                                 output.write(buffer, 0, read)
                                 digest.update(buffer, 0, read)
                                 downloaded += read.toLong()
-                                onProgress(
-                                    UpdateDownloadProgress(
-                                        downloadedBytes = downloaded,
-                                        totalBytes = total,
-                                    ),
-                                )
+                                emitProgress()
                             }
                             output.flush()
+                            output.fd.sync()
                         }
                     }
                     if (downloaded <= 0L) {
@@ -239,12 +290,14 @@ class AppUpdateManager(
                         )
                     }
                     validateDownloadedPackage(partial, validated)
+                    emitProgress(force = true)
                 }
             } finally {
                 // Keep cancellation wired up until the APK body is fully consumed.
                 cancellationSignal.complete()
             }
             moveIntoPlace(partial, target)
+            cleanupUpdateCache(keep = setOf(target))
             target
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -406,6 +459,48 @@ class AppUpdateManager(
         return output.toString(charset.name())
     }
 
+    private fun sha256File(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().toHexString()
+    }
+
+    /** Removes abandoned partial downloads and keeps the cache bounded over time. */
+    private fun cleanupUpdateCache(
+        keep: Set<File> = emptySet(),
+        keepBackupsFor: Set<File> = emptySet(),
+    ) {
+        val directory = updateDirectory
+        if (!directory.isDirectory) return
+        val keepPaths = keep.mapNotNull { runCatching { it.canonicalPath }.getOrNull() }.toSet()
+        val keepBackupPaths = keepBackupsFor.map { File(it.parentFile, "${it.name}.bak") }
+            .mapNotNull { runCatching { it.canonicalPath }.getOrNull() }
+            .toSet()
+        val apkFiles = directory.listFiles().orEmpty()
+            .filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
+            .sortedByDescending { it.lastModified() }
+        val retained = apkFiles.take(KEEP_APK_COUNT).mapNotNull {
+            runCatching { it.canonicalPath }.getOrNull()
+        }.toMutableSet()
+        retained += keepPaths
+        directory.listFiles().orEmpty().forEach { file ->
+            if (!file.isFile) return@forEach
+            val path = runCatching { file.canonicalPath }.getOrNull() ?: return@forEach
+            val temporary = file.name.endsWith(".download.apk", ignoreCase = true) ||
+                (file.name.endsWith(".apk.bak", ignoreCase = true) && path !in keepBackupPaths)
+            val oldApk = file.extension.equals("apk", ignoreCase = true) && path !in retained
+            if (temporary || oldApk) runCatching { file.delete() }
+        }
+    }
+
     private fun validateDownloadedPackage(apk: File, expected: AppUpdateInfo?) {
         val flags = PackageManager.GET_SIGNING_CERTIFICATES
         val archive = appContext.packageManager.getPackageArchiveInfo(apk.absolutePath, flags)
@@ -450,20 +545,34 @@ class AppUpdateManager(
         }
 
     private fun moveIntoPlace(partial: File, target: File) {
-        if (target.exists() && !target.delete()) {
+        val backup = File(target.parentFile, "${target.name}.bak")
+        if (backup.exists()) {
+            // Recover an interrupted replacement before starting another one. This keeps the
+            // last verified APK available even if the process died between the two renames.
+            if (!target.exists() && backup.isFile) {
+                if (!backup.renameTo(target)) {
+                    throw AppUpdateException(UpdateErrorKind.IO, "无法恢复旧的更新文件")
+                }
+            }
+            if (backup.exists() && !backup.delete()) {
+                throw AppUpdateException(UpdateErrorKind.IO, "无法清理旧的更新备份")
+            }
+        }
+        val hadTarget = target.exists()
+        if (hadTarget && !target.renameTo(backup)) {
             throw AppUpdateException(UpdateErrorKind.IO, "无法替换旧的更新文件")
         }
-        if (!partial.renameTo(target)) {
-            try {
+        try {
+            if (!partial.renameTo(target)) {
                 partial.copyTo(target, overwrite = false)
-                if (!partial.delete()) {
-                    // The verified target is still safe; leaving a harmless temporary APK
-                    // file is preferable to deleting the newly downloaded APK.
-                }
-            } catch (failure: IOException) {
-                target.delete()
-                throw AppUpdateException(UpdateErrorKind.IO, "无法保存更新文件", cause = failure)
+                partial.delete()
             }
+            if (hadTarget) backup.delete()
+        } catch (failure: Throwable) {
+            target.delete()
+            if (hadTarget) backup.renameTo(target)
+            if (failure is AppUpdateException) throw failure
+            throw AppUpdateException(UpdateErrorKind.IO, "无法保存更新文件", cause = failure)
         }
     }
 
@@ -478,6 +587,11 @@ class AppUpdateManager(
         const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         const val DOWNLOAD_BUFFER_SIZE = 32 * 1024
         const val MAX_MANIFEST_BYTES = 1024L * 1024L
+        const val MAX_APK_BYTES = 200L * 1024L * 1024L
+        const val KEEP_APK_COUNT = 2
+        const val PROGRESS_INTERVAL_MS = 200L
+        const val PROGRESS_MIN_DELTA_BYTES = 256L * 1024L
+        const val NANOS_PER_MILLISECOND = 1_000_000L
 
         fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

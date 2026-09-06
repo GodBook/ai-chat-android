@@ -16,6 +16,10 @@ import android.view.WindowManager
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
@@ -26,6 +30,7 @@ import kotlin.coroutines.resumeWithException
 /** Keeps a MediaProjection grant alive and captures one frame on demand. */
 class ScreenCaptureManager(private val context: Context) : AutoCloseable {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val conversionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var projection: MediaProjection? = null
     private var projectionCallback: MediaProjection.Callback? = null
     private var activeReader: ImageReader? = null
@@ -101,6 +106,7 @@ class ScreenCaptureManager(private val context: Context) : AutoCloseable {
     }
 
     override fun close() {
+        conversionScope.cancel()
         if (Looper.myLooper() == Looper.getMainLooper()) {
             releaseProjection()
         } else {
@@ -115,13 +121,20 @@ class ScreenCaptureManager(private val context: Context) : AutoCloseable {
         require(pixelStride > 0 && rowStride >= pixelStride * width) { "截图像素格式不受支持" }
         val rowPadding = rowStride - pixelStride * width
         val paddedWidth = width + rowPadding / pixelStride
-        val bitmap = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888)
-        val buffer: ByteBuffer = plane.buffer
-        bitmap.copyPixelsFromBuffer(buffer)
-        if (paddedWidth == width) return bitmap
-        val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
-        bitmap.recycle()
-        return cropped
+        var bitmap: Bitmap? = null
+        try {
+            bitmap = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888)
+            val buffer: ByteBuffer = plane.buffer
+            bitmap.copyPixelsFromBuffer(buffer)
+            if (paddedWidth == width) return bitmap
+            val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+            bitmap.recycle()
+            bitmap = null
+            return cropped
+        } catch (failure: Throwable) {
+            bitmap?.recycle()
+            throw failure
+        }
     }
 
     private fun ensureVirtualDisplay(
@@ -142,13 +155,21 @@ class ScreenCaptureManager(private val context: Context) : AutoCloseable {
                 return@setOnImageAvailableListener
             }
             pendingCapture = null
-            try {
-                val bitmap = imageToBitmap(image, captureWidth, captureHeight)
-                if (continuation.isActive) continuation.resume(bitmap) else bitmap.recycle()
-            } catch (failure: Throwable) {
-                if (continuation.isActive) continuation.resumeWithException(failure)
-            } finally {
-                image.close()
+            val widthAtCapture = captureWidth
+            val heightAtCapture = captureHeight
+            conversionScope.launch {
+                try {
+                    val bitmap = imageToBitmap(image, widthAtCapture, heightAtCapture)
+                    mainHandler.post {
+                        if (continuation.isActive) continuation.resume(bitmap) else bitmap.recycle()
+                    }
+                } catch (failure: Throwable) {
+                    mainHandler.post {
+                        if (continuation.isActive) continuation.resumeWithException(failure)
+                    }
+                } finally {
+                    image.close()
+                }
             }
         }, mainHandler)
         val display = runCatching {

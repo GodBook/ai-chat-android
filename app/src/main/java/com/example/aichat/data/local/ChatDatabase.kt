@@ -11,7 +11,7 @@ import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 
 @Database(
     entities = [ChatMessageEntity::class, ChatConversationEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -75,6 +75,16 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** Speeds up the newest-message-per-conversation query used by the chat list. */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_chat_messages_conversationId_createdAt_id` " +
+                        "ON `chat_messages` (`conversationId`, `createdAt`, `id`)",
+                )
+            }
+        }
+
         private val CREATE_DEFAULT_CONVERSATION = object : RoomDatabase.Callback() {
             override fun onCreate(database: SupportSQLiteDatabase) {
                 super.onCreate(database)
@@ -97,7 +107,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "ai_chat.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()
                     .also { instance = it }

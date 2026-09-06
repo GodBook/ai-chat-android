@@ -22,11 +22,14 @@ import com.example.aichat.data.network.ChatStreamEvent
 import com.example.aichat.data.network.OpenAiCompatibleClient
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
@@ -53,11 +56,22 @@ class DefaultChatRepository(
 
     override fun observeAllMessages(): Flow<List<ChatMessage>> = dao.observeAll()
         .map { rows -> rows.map { it.toDomain() } }
+        .conflate()
+        .flowOn(Dispatchers.IO)
+
+    override fun observeConversationPreviews(): Flow<List<ChatMessage>> = dao.observeLatestPerConversation()
+        .map { rows -> rows.map { it.toDomain() } }
+        .conflate()
+        .flowOn(Dispatchers.IO)
+
+    override fun observeAnyWorking(): Flow<Boolean> = dao.observeAnyGenerating()
+        .distinctUntilChanged()
         .flowOn(Dispatchers.IO)
 
     override fun observeMessages(conversationId: String): Flow<List<ChatMessage>> =
         dao.observeForConversation(normalizeConversationId(conversationId))
         .map { rows -> rows.map { it.toDomain() } }
+        .conflate()
         .flowOn(Dispatchers.IO)
 
     @Volatile
@@ -398,41 +412,65 @@ class DefaultChatRepository(
             activeAssistantId = assistant.id
             activeConversationId = assistant.conversationId
             stopRequestedFor = null
-            child = parentScope.launch(Dispatchers.IO) {
+            child = parentScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+                val responseText = StringBuilder()
+                var lastPersistedLength = 0
+                var lastPersistedAt = 0L
+                var generationCompleted = false
+
+                suspend fun persistStreamingText() {
+                    val now = System.nanoTime() / NANOS_PER_MILLISECOND
+                    val enoughText = responseText.length - lastPersistedLength >= STREAM_PERSIST_MIN_DELTA_CHARS
+                    val enoughTime = now - lastPersistedAt >= STREAM_PERSIST_INTERVAL_MS
+                    if (!enoughText && !enoughTime) return
+                    dao.update(
+                        assistant.copy(
+                            text = responseText.toString(),
+                            status = MessageStatus.STREAMING,
+                            errorMessage = null,
+                        ).toEntity(),
+                    )
+                    lastPersistedLength = responseText.length
+                    lastPersistedAt = now
+                }
+
                 try {
-                    var responseText = ""
                     dao.update(assistant.copy(status = MessageStatus.STREAMING).toEntity())
                     client.streamChat(config, history).collect { event ->
                         when (event) {
                             is ChatStreamEvent.Delta -> {
-                                responseText += event.text
-                                dao.update(
-                                    assistant.copy(
-                                        text = responseText,
-                                        status = MessageStatus.STREAMING,
-                                        errorMessage = null,
-                                    ).toEntity(),
-                                )
+                                responseText.append(event.text)
+                                persistStreamingText()
                             }
 
                             ChatStreamEvent.Done -> {
-                                dao.update(
-                                    assistant.copy(
-                                        text = responseText,
-                                        status = MessageStatus.SENT,
-                                        errorMessage = null,
-                                    ).toEntity(),
-                                )
-                                conversationDao.touch(assistant.conversationId, System.currentTimeMillis())
+                                // Complete the terminal write without cancellation. A stop tap
+                                // that races with DONE is handled only after this block, so it
+                                // cannot leave a successfully generated answer in STREAMING.
+                                withContext(NonCancellable) {
+                                    dao.update(
+                                        assistant.copy(
+                                            text = responseText.toString(),
+                                            status = MessageStatus.SENT,
+                                            errorMessage = null,
+                                        ).toEntity(),
+                                    )
+                                    conversationDao.touch(assistant.conversationId, System.currentTimeMillis())
+                                }
+                                generationCompleted = true
                             }
                         }
                     }
                 } catch (cancelled: CancellationException) {
-                    if (stopRequestedFor == assistant.id) {
+                    if (generationCompleted) {
+                        // The answer is already terminal; keep the SENT row even if the parent
+                        // scope is cancelled while the collector is unwinding.
+                    } else if (stopRequestedFor == assistant.id) {
                         withContext(NonCancellable + Dispatchers.IO) {
                             val current = dao.getById(assistant.id)?.toDomain() ?: assistant
                             dao.update(
                                 current.copy(
+                                    text = responseText.toString(),
                                     status = MessageStatus.INTERRUPTED,
                                     errorMessage = "已停止生成，可点击重试",
                                 ).toEntity(),
@@ -448,6 +486,7 @@ class DefaultChatRepository(
                         val current = dao.getById(assistant.id)?.toDomain() ?: assistant
                         dao.update(
                             current.copy(
+                                text = responseText.toString(),
                                 status = if (interrupted) MessageStatus.INTERRUPTED else MessageStatus.FAILED,
                                 errorMessage = exception.message,
                             ).toEntity(),
@@ -459,6 +498,7 @@ class DefaultChatRepository(
                         val current = dao.getById(assistant.id)?.toDomain() ?: assistant
                         dao.update(
                             current.copy(
+                                text = responseText.toString(),
                                 status = MessageStatus.FAILED,
                                 errorMessage = exception.message ?: "发送失败",
                             ).toEntity(),
@@ -477,6 +517,9 @@ class DefaultChatRepository(
                 }
             }
             activeJob = child
+            // Publish the handle before starting so stopGeneration() can always cancel this
+            // request, including when the provider completes immediately.
+            child.start()
         }
         child.join()
         return withContext(Dispatchers.IO) {
@@ -531,4 +574,10 @@ class DefaultChatRepository(
         text = text,
         imagePaths = imagePaths,
     )
+
+    private companion object {
+        const val STREAM_PERSIST_INTERVAL_MS = 120L
+        const val STREAM_PERSIST_MIN_DELTA_CHARS = 512
+        const val NANOS_PER_MILLISECOND = 1_000_000L
+    }
 }

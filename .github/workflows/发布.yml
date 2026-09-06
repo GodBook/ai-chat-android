@@ -14,18 +14,17 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-release-publish
+  cancel-in-progress: false
+
 jobs:
   release:
     name: 构建并发布 APK
     runs-on: ubuntu-latest
     env:
       UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
-      KEYSTORE_PASSWORD: ${{ secrets.AI_CHAT_SIGNING_KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.AI_CHAT_SIGNING_KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.AI_CHAT_SIGNING_KEY_PASSWORD }}
-      KEYSTORE_B64: ${{ secrets.AI_CHAT_SIGNING_KEYSTORE_B64 }}
       RELEASE_NOTES_INPUT: ${{ github.event.inputs.release_notes }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: 检出源码
@@ -55,6 +54,11 @@ jobs:
 
       - name: 用固定签名证书签名并生成更新清单
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.AI_CHAT_SIGNING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AI_CHAT_SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.AI_CHAT_SIGNING_KEY_PASSWORD }}
+          KEYSTORE_B64: ${{ secrets.AI_CHAT_SIGNING_KEYSTORE_B64 }}
         run: |
           set -euo pipefail
           test -n "$KEYSTORE_B64"
@@ -64,12 +68,14 @@ jobs:
           trap 'rm -f signing.keystore' EXIT
           printf '%s' "$KEYSTORE_B64" | base64 --decode > signing.keystore
           mkdir -p dist
-          build_tools="$(basename "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)")"
-          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          apksigner="$build_tools/apksigner"
+          test -x "$apksigner"
           version_name="$(awk -F'"' '/versionName[[:space:]]*=/ {print $2; exit}' app/build.gradle.kts)"
           version_code="$(awk '/versionCode[[:space:]]*=/ {print $3; exit}' app/build.gradle.kts)"
           test -n "$version_name"
           test -n "$version_code"
+          [[ "$version_code" =~ ^[1-9][0-9]*$ ]]
           expected_tag="v$version_name"
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             release_tag="$GITHUB_REF_NAME"
@@ -82,19 +88,37 @@ jobs:
           test -f "$unsigned_apk"
           "$apksigner" sign --ks signing.keystore --ks-key-alias "$KEY_ALIAS" --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" --out "dist/$apk_name" "$unsigned_apk"
           "$apksigner" verify --verbose "dist/$apk_name"
+          apk_size="$(stat -c '%s' "dist/$apk_name")"
+          test "$apk_size" -gt 0
+          test "$apk_size" -le $((200 * 1024 * 1024))
           sha256="$(sha256sum "dist/$apk_name" | cut -d ' ' -f 1)"
-          jq -n --argjson versionCode "$version_code" --arg versionName "$version_name" --arg downloadUrl "https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag/$apk_name" --arg sha256 "$sha256" --arg releaseNotes "${RELEASE_NOTES_INPUT:-自动构建发布}" '{versionCode: $versionCode, versionName: $versionName, downloadUrl: $downloadUrl, sha256: $sha256, releaseNotes: $releaseNotes}' > dist/latest.json
-          printf '%s' "${RELEASE_NOTES_INPUT:-自动构建发布}" > dist/release-notes.md
+          download_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag/$apk_name"
+          release_notes="${RELEASE_NOTES_INPUT:-自动构建发布}"
+          test "${#release_notes}" -le 32000
+          jq -n --argjson versionCode "$version_code" --arg versionName "$version_name" --arg downloadUrl "$download_url" --arg sha256 "$sha256" --arg releaseNotes "$release_notes" '{versionCode: $versionCode, versionName: $versionName, downloadUrl: $downloadUrl, sha256: $sha256, releaseNotes: $releaseNotes}' > dist/latest.json
+          jq -e --argjson versionCode "$version_code" --arg versionName "$version_name" --arg downloadUrl "$download_url" --arg sha256 "$sha256" '(.versionCode == $versionCode) and (.versionName == $versionName) and (.sha256 == $sha256) and (.downloadUrl == $downloadUrl)' dist/latest.json >/dev/null
+          printf '%s  %s\n' "$sha256" "dist/$apk_name" | sha256sum -c -
+          printf '%s' "$release_notes" > dist/release-notes.md
           echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$version_name" >> "$GITHUB_ENV"
           echo "APK_NAME=$apk_name" >> "$GITHUB_ENV"
 
       - name: 发布 GitHub Release
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "dist/$APK_NAME" dist/latest.json --clobber
             gh release edit "$RELEASE_TAG" --title "AI BOTOY $VERSION_NAME" --notes-file dist/release-notes.md
           else
-            gh release create "$RELEASE_TAG" "dist/$APK_NAME" dist/latest.json --title "AI BOTOY $VERSION_NAME" --notes-file dist/release-notes.md
+            gh release create "$RELEASE_TAG" --title "AI BOTOY $VERSION_NAME" --notes-file dist/release-notes.md
           fi
+          # Publish the APK first and the manifest last. Until latest.json is
+          # visible, clients keep using the previous release or retry a 404;
+          # they never receive a manifest that points at a missing APK.
+          gh release upload "$RELEASE_TAG" "dist/$APK_NAME" --clobber
+          gh release upload "$RELEASE_TAG" dist/latest.json --clobber
+          assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          printf '%s\n' "$assets" | grep -Fx -- "$APK_NAME" >/dev/null
+          printf '%s\n' "$assets" | grep -Fx -- "latest.json" >/dev/null
