@@ -134,10 +134,10 @@ class DefaultChatRepository(
             createdAt = now + 1,
         )
         val history = database.withTransaction {
-            val requestHistory = dao.getForConversation(selectedConversationId).map { it.toDomain() }
+            val requestHistory = limitContext(dao.getForConversation(selectedConversationId).map { it.toDomain() }
                 .filter { it.status == MessageStatus.SENT }
                 .map { it.toRequestMessage() }
-                .plus(user.toRequestMessage())
+                .plus(user.toRequestMessage()))
             dao.insertAll(listOf(user.toEntity(), assistant.toEntity()))
             conversationDao.touch(selectedConversationId, now)
             requestHistory
@@ -195,10 +195,10 @@ class DefaultChatRepository(
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
-        val history = all.take(userIndex.coerceAtLeast(0))
+        val history = limitContext(all.take(userIndex.coerceAtLeast(0))
             .filter { it.status == MessageStatus.SENT }
             .map { it.toRequestMessage() }
-            .plus(user.toRequestMessage())
+            .plus(user.toRequestMessage()))
         val pending = target.copy(
             text = "",
             status = MessageStatus.SENDING,
@@ -575,9 +575,25 @@ class DefaultChatRepository(
         imagePaths = imagePaths,
     )
 
+    /** Keeps recent context bounded so long chats remain responsive and fit provider limits. */
+    private fun limitContext(messages: List<ChatRequestMessage>): List<ChatRequestMessage> {
+        var remaining = MAX_CONTEXT_CHARS
+        val kept = ArrayDeque<ChatRequestMessage>()
+        messages.asReversed().forEach { message ->
+            val cost = message.text.length + message.imagePaths.size * IMAGE_CONTEXT_COST
+            if (kept.isEmpty() || remaining - cost >= 0) {
+                kept.addFirst(message)
+                remaining -= cost
+            }
+        }
+        return kept.toList()
+    }
+
     private companion object {
         const val STREAM_PERSIST_INTERVAL_MS = 120L
         const val STREAM_PERSIST_MIN_DELTA_CHARS = 512
         const val NANOS_PER_MILLISECOND = 1_000_000L
+        const val MAX_CONTEXT_CHARS = 48_000
+        const val IMAGE_CONTEXT_COST = 2_000
     }
 }
