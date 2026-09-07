@@ -58,39 +58,65 @@ class ScreenshotOverlayManager(context: Context) {
 
     private fun addShortAnswer(indicator: ShortAnswerIndicator): Boolean {
         removeCurrent()
-        val box = View(appContext).apply {
-            background = roundedBackground(Color.rgb(128, 128, 128), 1)
-        }
-        val screenWidth = appContext.resources.displayMetrics.widthPixels
+        // A multiple choice question selects several columns at once, so the whole screen width is
+        // split into equal sections and every selected section gets its own grey block.
         val sections = when (indicator) {
-            is ShortAnswerIndicator.Choice -> 4
-            is ShortAnswerIndicator.Judgment -> 2
+            is ShortAnswerIndicator.Choice ->
+                maxOf(MIN_CHOICE_SECTIONS, (indicator.options.maxOrNull() ?: 0) + 1)
+            is ShortAnswerIndicator.Judgment -> JUDGMENT_SECTIONS
         }
-        val section = when (indicator) {
-            is ShortAnswerIndicator.Choice -> indicator.option
-            is ShortAnswerIndicator.Judgment -> if (indicator.correct) 0 else 1
+        val selected = when (indicator) {
+            is ShortAnswerIndicator.Choice -> indicator.options
+            is ShortAnswerIndicator.Judgment -> setOf(if (indicator.correct) 0 else 1)
+        }.filter { it in 0 until sections }.toSet()
+        if (selected.isEmpty()) return false
+        val row = LinearLayout(appContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setBackgroundColor(Color.TRANSPARENT)
         }
-        val boxWidth = dp(SHORT_BOX_WIDTH_DP)
-        val centerX = ((section + 0.5f) * screenWidth / sections).toInt()
+        val rowHeight = dp(SHORT_BOX_HEIGHT_DP)
+        for (index in 0 until sections) {
+            val cell = FrameLayout(appContext)
+            if (index in selected) {
+                val box = View(appContext).apply {
+                    background = roundedBackground(Color.rgb(128, 128, 128), 1)
+                }
+                cell.addView(
+                    box,
+                    FrameLayout.LayoutParams(
+                        dp(SHORT_BOX_WIDTH_DP).coerceAtMost(sectionWidth(sections)),
+                        rowHeight,
+                        Gravity.CENTER,
+                    ),
+                )
+            }
+            row.addView(cell, LinearLayout.LayoutParams(0, rowHeight, 1f))
+        }
         val params = WindowManager.LayoutParams(
-            boxWidth,
-            dp(SHORT_BOX_HEIGHT_DP),
+            WindowManager.LayoutParams.MATCH_PARENT,
+            rowHeight,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
-            x = (centerX - boxWidth / 2).coerceIn(0, (screenWidth - boxWidth).coerceAtLeast(0))
+            x = 0
             y = 0
         }
         return runCatching {
-            windowManager.addView(box, params)
-            currentView = box
-            autoDismissRunnable = Runnable { if (currentView === box) removeCurrent() }.also {
+            windowManager.addView(row, params)
+            currentView = row
+            autoDismissRunnable = Runnable { if (currentView === row) removeCurrent() }.also {
                 mainHandler.postDelayed(it, SHORT_DISPLAY_DURATION_MS)
             }
             true
         }.getOrDefault(false)
+    }
+
+    private fun sectionWidth(sections: Int): Int {
+        val screenWidth = appContext.resources.displayMetrics.widthPixels
+        return (screenWidth / sections).coerceAtLeast(1)
     }
 
     fun dismiss() {
@@ -535,6 +561,8 @@ class ScreenshotOverlayManager(context: Context) {
         const val SHORT_DISPLAY_DURATION_MS = 1_000L
         const val SHORT_BOX_WIDTH_DP = 32
         const val SHORT_BOX_HEIGHT_DP = 19
+        const val MIN_CHOICE_SECTIONS = 4
+        const val JUDGMENT_SECTIONS = 2
         const val ENTER_ANIMATION_MS = 180L
         const val SWIPE_DISMISS_ANIMATION_MS = 180L
         const val SWIPE_RETURN_ANIMATION_MS = 140L

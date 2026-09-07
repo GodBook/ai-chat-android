@@ -512,7 +512,7 @@ internal fun SettingsScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("选择/判断题简版回答模式", fontWeight = FontWeight.Medium)
                     Text(
-                        "识别到选择题显示 A-D 方块，判断题左边为正确、右边为错误；只显示约 1 秒，不弹出文字回答",
+                        "识别到选择题显示 A-D 方块（多选题会同时点亮多个），判断题左边为正确、右边为错误；只显示约 1 秒，不弹出文字回答",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
