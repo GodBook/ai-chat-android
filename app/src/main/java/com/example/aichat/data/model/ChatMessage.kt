@@ -9,6 +9,31 @@ const val MAX_SCREENSHOT_PROMPT_LENGTH = 2_000
 const val DEFAULT_OVERLAY_BACKGROUND_COLOR = "#CCF1FB"
 const val DEFAULT_OVERLAY_GLASS_ENABLED = false
 
+/** Default provider endpoint. DeepSeek is the out-of-the-box provider. */
+const val DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+
+/** Default model. Timed releases carry an `expires-on-` suffix and stop working afterwards. */
+const val DEFAULT_MODEL = "deepseek-v4.1-flash-expires-on-0910"
+
+/** Used automatically when [DEFAULT_MODEL] is gone, for example after it expires. */
+const val FALLBACK_MODEL = "deepseek-v4-flash"
+
+private val MODEL_FALLBACKS: Map<String, String> = mapOf(
+    DEFAULT_MODEL to FALLBACK_MODEL,
+)
+
+/**
+ * Models to try in order, primary first.
+ *
+ * Only known models get a fallback so a custom model is never silently swapped for another one.
+ */
+fun modelCandidatesFor(model: String): List<String> {
+    val primary = model.trim()
+    if (primary.isEmpty()) return listOf(DEFAULT_MODEL)
+    val fallback = MODEL_FALLBACKS[primary] ?: return listOf(primary)
+    return listOf(primary, fallback)
+}
+
 /** Volume key combination that starts the background screenshot question flow. */
 enum class ScreenshotTrigger(
     /** Stable value persisted in DataStore. */
@@ -93,8 +118,8 @@ data class ChatMessage(
 )
 
 data class ProviderConfig(
-    val baseUrl: String = "https://api.openai.com/v1",
-    val model: String = "gpt-4o-mini",
+    val baseUrl: String = DEFAULT_BASE_URL,
+    val model: String = DEFAULT_MODEL,
     val apiKey: String? = null,
     val visionEnabled: Boolean = true,
     /** Enables the background volume-down screenshot question flow. */

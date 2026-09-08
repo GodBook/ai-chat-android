@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.aichat.data.model.DEFAULT_BASE_URL
+import com.example.aichat.data.model.DEFAULT_MODEL
 import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
 import com.example.aichat.data.model.DEFAULT_OVERLAY_GLASS_ENABLED
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
@@ -102,8 +104,6 @@ class ConfigStore(context: Context) {
     }
 
     private companion object {
-        const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
-        const val DEFAULT_MODEL = "gpt-4o-mini"
         val BASE_URL = stringPreferencesKey("base_url")
         val MODEL = stringPreferencesKey("model")
         val VISION_ENABLED = booleanPreferencesKey("vision_enabled")

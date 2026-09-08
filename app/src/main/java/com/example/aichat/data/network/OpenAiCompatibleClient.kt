@@ -5,6 +5,7 @@ import com.example.aichat.data.local.ImageStore
 import com.example.aichat.data.model.ChatRequestMessage
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.ProviderConfig
+import com.example.aichat.data.model.modelCandidatesFor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -66,8 +67,42 @@ class OpenAiCompatibleClient(
         isLenient = true
     }
 
+    /**
+     * Streams a reply, retrying with the fallback model when the configured one is gone
+     * (expired timed releases, renamed models, and so on).
+     *
+     * A retry only happens before any text has been emitted, so a reply is never duplicated.
+     * The first error is the one reported when every candidate fails.
+     */
     fun streamChat(
         config: ProviderConfig,
+        messages: List<ChatRequestMessage>,
+    ): Flow<ChatStreamEvent> = flow {
+        val candidates = modelCandidatesFor(config.model)
+        var firstFailure: ChatClientException? = null
+        for ((index, model) in candidates.withIndex()) {
+            var emittedAnyText = false
+            try {
+                streamChatOnce(config, model, messages).collect { event ->
+                    if (event is ChatStreamEvent.Delta) emittedAnyText = true
+                    emit(event)
+                }
+                return@flow
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: ChatClientException) {
+                val canRetry = !emittedAnyText &&
+                    index < candidates.lastIndex &&
+                    failure.isModelUnavailable()
+                if (!canRetry) throw firstFailure ?: failure
+                if (firstFailure == null) firstFailure = failure
+            }
+        }
+    }
+
+    private fun streamChatOnce(
+        config: ProviderConfig,
+        model: String,
         messages: List<ChatRequestMessage>,
     ): Flow<ChatStreamEvent> = flow {
         val endpoint = validateAndBuildEndpoint(config)
@@ -76,7 +111,7 @@ class OpenAiCompatibleClient(
             .header("Authorization", "Bearer ${config.apiKey!!.trim()}")
             .header("Accept", "text/event-stream")
             .header("Cache-Control", "no-cache")
-            .post(ChatCompletionsRequestBody(config.model.trim(), messages, imageFileStore))
+            .post(ChatCompletionsRequestBody(model.trim(), messages, imageFileStore))
             .build()
         val call = client.newCall(request)
         val cancellationSignal = call.cancellationSignal(currentCoroutineContext()[Job])
@@ -212,6 +247,36 @@ class OpenAiCompatibleClient(
                 if (failure is CancellationException) cancel()
             }
         }
+}
+
+/** Status codes that can mean the requested model is gone, usually a 404 from the provider. */
+private val MODEL_UNAVAILABLE_STATUSES = setOf(null, 400, 403, 404, 422)
+
+private val MODEL_UNAVAILABLE_HINTS = listOf(
+    "model",
+    "模型",
+    "not found",
+    "does not exist",
+    "unknown",
+    "invalid",
+    "unavailable",
+    "deprecated",
+    "expired",
+    "不存在",
+    "未知",
+    "无效",
+    "不可用",
+    "无权限",
+    "过期",
+    "下线",
+)
+
+/** True when the provider rejected the model itself rather than the request or the account. */
+private fun ChatClientException.isModelUnavailable(): Boolean {
+    if (statusCode == 404) return true
+    if (statusCode !in MODEL_UNAVAILABLE_STATUSES) return false
+    val text = message.lowercase()
+    return MODEL_UNAVAILABLE_HINTS.any { hint -> text.contains(hint) }
 }
 
 private class ChatCompletionsRequestBody(

@@ -77,6 +77,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.BuildConfig
 import com.example.aichat.background.BackgroundScreenshotManager
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
+import com.example.aichat.data.model.FALLBACK_MODEL
 import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.OVERLAY_COLOR_PRESETS
 import com.example.aichat.data.model.ScreenshotTrigger
@@ -451,7 +452,7 @@ internal fun SettingsScreen(
                 onValueChange = { baseUrl = it; saved = false },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("接口地址") },
-                supportingText = { Text("例如：https://api.openai.com/v1") },
+                supportingText = { Text("例如：https://api.deepseek.com/v1") },
                 singleLine = true,
             )
             OutlinedTextField(
@@ -459,6 +460,7 @@ internal fun SettingsScreen(
                 onValueChange = { model = it; saved = false },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("模型名称") },
+                supportingText = { Text("默认模型失效时会自动改用 $FALLBACK_MODEL") },
                 singleLine = true,
             )
             OutlinedTextField(

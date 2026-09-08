@@ -2,6 +2,8 @@ package com.example.aichat.data.network
 
 import com.example.aichat.data.local.ImageStore
 import com.example.aichat.data.model.ChatRequestMessage
+import com.example.aichat.data.model.DEFAULT_MODEL
+import com.example.aichat.data.model.FALLBACK_MODEL
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.ProviderConfig
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +97,85 @@ class OpenAiCompatibleClientTest {
                 assertEquals(ChatErrorKind.UNAUTHORIZED, failure.kind)
                 assertEquals("密钥无效", failure.message)
             }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `an unavailable model is retried with the fallback model`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(404)
+                .setBody("{\"error\":{\"message\":\"model deepseek-v4.1-flash-expires-on-0910 not found\"}}"),
+        )
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"已切换\"}}]}\n\ndata: [DONE]\n\n"),
+        )
+        server.start()
+        try {
+            val client = OpenAiCompatibleClient(
+                imageFileStore = TestImageStore,
+                httpClient = OkHttpClient.Builder().build(),
+                allowInsecureHttp = true,
+            )
+            val events = client.streamChat(
+                config = ProviderConfig(
+                    baseUrl = server.url("/v1").toString().removeSuffix("/"),
+                    model = DEFAULT_MODEL,
+                    apiKey = "test-key",
+                ),
+                messages = listOf(ChatRequestMessage(MessageRole.USER, "hello")),
+            ).toList()
+
+            assertEquals(
+                listOf(ChatStreamEvent.Delta("已切换"), ChatStreamEvent.Done),
+                events,
+            )
+            assertTrue(
+                server.takeRequest().body.readUtf8().contains("\"model\":\"$DEFAULT_MODEL\""),
+            )
+            assertTrue(
+                server.takeRequest().body.readUtf8().contains("\"model\":\"$FALLBACK_MODEL\""),
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `auth failures are not retried with the fallback model`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setBody("{\"error\":{\"message\":\"密钥无效\"}}"),
+        )
+        server.start()
+        try {
+            val client = OpenAiCompatibleClient(
+                imageFileStore = TestImageStore,
+                httpClient = OkHttpClient.Builder().build(),
+                allowInsecureHttp = true,
+            )
+            try {
+                client.streamChat(
+                    ProviderConfig(
+                        baseUrl = server.url("/v1").toString().removeSuffix("/"),
+                        model = DEFAULT_MODEL,
+                        apiKey = "test-key",
+                    ),
+                    listOf(ChatRequestMessage(MessageRole.USER, "hello")),
+                ).toList()
+                throw AssertionError("expected ChatClientException")
+            } catch (failure: ChatClientException) {
+                assertEquals(ChatErrorKind.UNAUTHORIZED, failure.kind)
+            }
+            server.takeRequest()
+            assertEquals(1, server.requestCount)
         } finally {
             server.shutdown()
         }
