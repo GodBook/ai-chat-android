@@ -10,7 +10,10 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
 import com.example.aichat.data.model.DEFAULT_OVERLAY_GLASS_ENABLED
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
+import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.model.normalizeOverlayBackgroundColor
+import com.example.aichat.data.model.normalizeScreenshotTrigger
 import com.example.aichat.data.model.ProviderConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -36,6 +39,7 @@ class ConfigStore(context: Context) {
             ),
             overlayGlassEnabled = preferences[OVERLAY_GLASS_ENABLED] ?: DEFAULT_OVERLAY_GLASS_ENABLED,
             shortAnswerModeEnabled = preferences[SHORT_ANSWER_MODE_ENABLED] ?: false,
+            screenshotTrigger = normalizeScreenshotTrigger(preferences[SCREENSHOT_TRIGGER]),
         )
     }
 
@@ -50,6 +54,7 @@ class ConfigStore(context: Context) {
         overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
         overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
         shortAnswerModeEnabled: Boolean = false,
+        screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -60,6 +65,7 @@ class ConfigStore(context: Context) {
             preferences[OVERLAY_BACKGROUND_COLOR] = normalizeOverlayBackgroundColor(overlayBackgroundColor)
             preferences[OVERLAY_GLASS_ENABLED] = overlayGlassEnabled
             preferences[SHORT_ANSWER_MODE_ENABLED] = shortAnswerModeEnabled
+            preferences[SCREENSHOT_TRIGGER] = screenshotTrigger.storageKey
         }
     }
 
@@ -72,6 +78,7 @@ class ConfigStore(context: Context) {
         overlayBackgroundColor = config.overlayBackgroundColor,
         overlayGlassEnabled = config.overlayGlassEnabled,
         shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+        screenshotTrigger = config.screenshotTrigger,
     )
 
     /** Updates only overlay appearance so an immediate color choice cannot overwrite other settings. */
@@ -83,6 +90,11 @@ class ConfigStore(context: Context) {
             preferences[OVERLAY_BACKGROUND_COLOR] = normalizeOverlayBackgroundColor(backgroundColor)
             preferences[OVERLAY_GLASS_ENABLED] = glassEnabled
         }
+    }
+
+    /** Updates only the screenshot shortcut so an immediate choice cannot overwrite other settings. */
+    suspend fun updateScreenshotTrigger(trigger: ScreenshotTrigger) {
+        dataStore.edit { preferences -> preferences[SCREENSHOT_TRIGGER] = trigger.storageKey }
     }
 
     suspend fun reset() {
@@ -100,5 +112,6 @@ class ConfigStore(context: Context) {
         val OVERLAY_BACKGROUND_COLOR = stringPreferencesKey("overlay_background_color")
         val OVERLAY_GLASS_ENABLED = booleanPreferencesKey("overlay_glass_enabled")
         val SHORT_ANSWER_MODE_ENABLED = booleanPreferencesKey("short_answer_mode_enabled")
+        val SCREENSHOT_TRIGGER = stringPreferencesKey("screenshot_trigger")
     }
 }

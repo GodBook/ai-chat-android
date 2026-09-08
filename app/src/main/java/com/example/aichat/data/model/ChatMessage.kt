@@ -9,6 +9,41 @@ const val MAX_SCREENSHOT_PROMPT_LENGTH = 2_000
 const val DEFAULT_OVERLAY_BACKGROUND_COLOR = "#CCF1FB"
 const val DEFAULT_OVERLAY_GLASS_ENABLED = false
 
+/** Volume key combination that starts the background screenshot question flow. */
+enum class ScreenshotTrigger(
+    /** Stable value persisted in DataStore. */
+    val storageKey: String,
+    /** Short label shown in the settings screen. */
+    val label: String,
+    /** Longer explanation shown under the option. */
+    val description: String,
+) {
+    VOLUME_DOWN(
+        storageKey = "volume_down",
+        label = "音量下键",
+        description = "按一下就截图，操作最快，但调音量时容易误触",
+    ),
+    VOLUME_UP_DOWN(
+        storageKey = "volume_up_down",
+        label = "音量上 + 下键",
+        description = "两个键一起按住才截图，不容易误触，但单手不太好按",
+    ),
+    ;
+
+    companion object {
+        fun fromStorageKey(value: String?): ScreenshotTrigger {
+            val normalized = value?.trim()?.lowercase()
+            return entries.firstOrNull { it.storageKey == normalized } ?: DEFAULT_SCREENSHOT_TRIGGER
+        }
+    }
+}
+
+/** New installs keep the historical behaviour: a single volume-down press. */
+val DEFAULT_SCREENSHOT_TRIGGER: ScreenshotTrigger = ScreenshotTrigger.VOLUME_DOWN
+
+fun normalizeScreenshotTrigger(value: String?): ScreenshotTrigger =
+    ScreenshotTrigger.fromStorageKey(value)
+
 data class OverlayColorPreset(
     val label: String,
     val colorHex: String,
@@ -72,6 +107,8 @@ data class ProviderConfig(
     val overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
     /** Shows only a one-second answer indicator for recognized choice/judgment questions. */
     val shortAnswerModeEnabled: Boolean = false,
+    /** Volume key combination that starts the background screenshot flow. */
+    val screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

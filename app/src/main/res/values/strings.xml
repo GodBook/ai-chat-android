@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">AI BOTOY</string>
-    <string name="volume_screenshot_accessibility_description">监听音量下键以触发后台截屏问答</string>
+    <string name="volume_screenshot_accessibility_description">监听音量键以触发后台截屏问答：可以是音量下键，也可以是音量上键与音量下键同时按住，具体组合在应用内设置</string>
 </resources>

@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.annotation.RequiresApi
 import com.example.aichat.AiChatApplication
 import com.example.aichat.data.model.ProviderConfig
+import com.example.aichat.data.model.ScreenshotTrigger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -23,7 +24,10 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.coroutines.coroutineContext
 
-/** Receives global volume-down key events after the user enables this accessibility service. */
+/**
+ * Receives global volume key events after the user enables this accessibility
+ * service and starts the background screenshot flow for the configured shortcut.
+ */
 class VolumeDownAccessibilityService : AccessibilityService() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Main.immediate)
@@ -32,7 +36,12 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     private lateinit var questionProcessor: ScreenshotQuestionProcessor
     @Volatile private var enabled = false
     @Volatile private var latestConfig = ProviderConfig()
+    @Volatile private var trigger: ScreenshotTrigger = ScreenshotTrigger.VOLUME_DOWN
     private var configJob: Job? = null
+    /** Down-press timestamp per volume key slot: 0 = VOLUME_DOWN, 1 = VOLUME_UP. */
+    private val volumeKeyPressedAt = LongArray(2)
+    /** Blocks a second pair trigger while the user still holds both keys. */
+    private var pairTriggerConsumed = false
     @Volatile private var captureJob: Job? = null
     @Volatile private var screenshotPending = false
     private var lastTriggerAt = 0L
@@ -59,21 +68,61 @@ class VolumeDownAccessibilityService : AccessibilityService() {
             app.container.configStore.config.collectLatest { config ->
                 latestConfig = config
                 enabled = config.backgroundCaptureEnabled
+                trigger = config.screenshotTrigger
             }
         }
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (!enabled || event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
-        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastTriggerAt >= TRIGGER_DEBOUNCE_MS) {
-                lastTriggerAt = now
-                captureFromTrigger()
-            }
+        if (!enabled) {
+            resetVolumeKeyState()
+            return false
         }
+        val slot = when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN -> SLOT_VOLUME_DOWN
+            KeyEvent.KEYCODE_VOLUME_UP -> SLOT_VOLUME_UP
+            else -> return false
+        }
+        if (event.action == KeyEvent.ACTION_UP) {
+            onVolumeKeyReleased(slot)
+            return false
+        }
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        val now = android.os.SystemClock.elapsedRealtime()
+        // Repeat events refresh the hold timestamp so a long press still counts as held.
+        volumeKeyPressedAt[slot] = now
+        if (event.repeatCount != 0) return false
+        onVolumeKeyPressed(slot, now)
         // Do not consume the key: the normal system volume behavior remains available.
         return false
+    }
+
+    private fun onVolumeKeyPressed(slot: Int, now: Long) {
+        val matched = when (trigger) {
+            ScreenshotTrigger.VOLUME_DOWN -> slot == SLOT_VOLUME_DOWN
+            ScreenshotTrigger.VOLUME_UP_DOWN -> !pairTriggerConsumed && isHeld(1 - slot, now)
+        }
+        if (!matched) return
+        if (trigger == ScreenshotTrigger.VOLUME_UP_DOWN) pairTriggerConsumed = true
+        if (now - lastTriggerAt < TRIGGER_DEBOUNCE_MS) return
+        lastTriggerAt = now
+        captureFromTrigger()
+    }
+
+    private fun onVolumeKeyReleased(slot: Int) {
+        volumeKeyPressedAt[slot] = 0L
+        pairTriggerConsumed = false
+    }
+
+    private fun resetVolumeKeyState() {
+        volumeKeyPressedAt.fill(0L)
+        pairTriggerConsumed = false
+    }
+
+    /** Treats a key as held while its last down or repeat event is recent enough. */
+    private fun isHeld(slot: Int, now: Long): Boolean {
+        val pressedAt = volumeKeyPressedAt[slot]
+        return pressedAt != 0L && now - pressedAt <= PAIR_WINDOW_MS
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -252,6 +301,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         enabled = false
+        resetVolumeKeyState()
         val runningJob = synchronized(captureLock) {
             screenshotPending = false
             captureJob.also { captureJob = null }
@@ -267,5 +317,9 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     private companion object {
         const val TRIGGER_DEBOUNCE_MS = 700L
+        /** How long a held volume key still counts as part of an up + down combination. */
+        const val PAIR_WINDOW_MS = 2_000L
+        const val SLOT_VOLUME_DOWN = 0
+        const val SLOT_VOLUME_UP = 1
     }
 }

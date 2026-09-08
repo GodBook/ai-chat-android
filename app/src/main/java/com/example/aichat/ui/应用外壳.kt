@@ -150,6 +150,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             overlayBackgroundColor,
                             overlayGlassEnabled,
                             shortAnswerModeEnabled,
+                            screenshotTrigger,
                         ->
                         viewModel.saveConfig(
                             baseUrl = baseUrl,
@@ -162,6 +163,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             overlayBackgroundColor = overlayBackgroundColor,
                             overlayGlassEnabled = overlayGlassEnabled,
                             shortAnswerModeEnabled = shortAnswerModeEnabled,
+                            screenshotTrigger = screenshotTrigger,
                         ).also { result ->
                             if (result.isSuccess) {
                                 if (backgroundEnabled) {
@@ -188,6 +190,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     },
                     onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
                     onShortAnswerModeChanged = viewModel::setShortAnswerModeEnabled,
+                    onScreenshotTriggerChanged = viewModel::setScreenshotTrigger,
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,
                     onDownloadUpdate = viewModel::downloadUpdate,

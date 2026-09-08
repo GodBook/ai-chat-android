@@ -48,6 +48,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -78,6 +79,7 @@ import com.example.aichat.background.BackgroundScreenshotManager
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.OVERLAY_COLOR_PRESETS
+import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.update.InstallPreparation
 import kotlinx.coroutines.launch
 
@@ -194,15 +196,69 @@ private fun OverlayAppearanceSettings(
     }
 }
 
+@Composable
+private fun ScreenshotTriggerSettings(
+    trigger: ScreenshotTrigger,
+    enabled: Boolean,
+    onTriggerChanged: (ScreenshotTrigger) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "截图快捷键",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        ScreenshotTrigger.entries.forEach { option ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .selectable(
+                        selected = trigger == option,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onClick = { onTriggerChanged(option) },
+                    )
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = trigger == option, onClick = null, enabled = enabled)
+                Spacer(Modifier.size(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(option.label, fontWeight = FontWeight.Medium)
+                    Text(
+                        option.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsScreen(
     state: MainUiState,
     onBack: () -> Unit,
-    onSave: suspend (String, String, String, Boolean, String, Boolean, String, String, Boolean, Boolean) -> Result<Unit>,
+    onSave: suspend (
+        String,
+        String,
+        String,
+        Boolean,
+        String,
+        Boolean,
+        String,
+        String,
+        Boolean,
+        Boolean,
+        ScreenshotTrigger,
+    ) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
+    onScreenshotTriggerChanged: suspend (ScreenshotTrigger) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
@@ -232,6 +288,9 @@ internal fun SettingsScreen(
     var shortAnswerModeEnabled by rememberSaveable(state.config.shortAnswerModeEnabled) {
         mutableStateOf(state.config.shortAnswerModeEnabled)
     }
+    var screenshotTrigger by rememberSaveable(state.config.screenshotTrigger) {
+        mutableStateOf(state.config.screenshotTrigger)
+    }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -240,6 +299,7 @@ internal fun SettingsScreen(
     var updatingBackgroundCapture by remember { mutableStateOf(false) }
     var updatingOverlayAppearance by remember { mutableStateOf(false) }
     var updatingShortAnswerMode by remember { mutableStateOf(false) }
+    var updatingScreenshotTrigger by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
     var pendingBackgroundEnable by remember { mutableStateOf<Boolean?>(null) }
@@ -444,9 +504,9 @@ internal fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("音量下键后台截图问答", fontWeight = FontWeight.Medium)
+                    Text("后台截图问答", fontWeight = FontWeight.Medium)
                     Text(
-                        "开启后，应用在后台运行时按下音量下键会截取屏幕并发送给 AI；需要同时开启支持图片",
+                        "开启后，应用在后台运行时按设置好的音量键会截取屏幕并发送给 AI；需要同时开启支持图片",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -545,6 +605,33 @@ internal fun SettingsScreen(
             }
             if (backgroundCaptureEnabled) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ScreenshotTriggerSettings(
+                        trigger = screenshotTrigger,
+                        enabled = !saving && !updatingScreenshotTrigger,
+                        onTriggerChanged = { requested ->
+                            if (requested != screenshotTrigger) {
+                                val previous = screenshotTrigger
+                                screenshotTrigger = requested
+                                saved = false
+                                updatingScreenshotTrigger = true
+                                scope.launch {
+                                    try {
+                                        onScreenshotTriggerChanged(requested)
+                                            .onSuccess {
+                                                error = null
+                                                saved = true
+                                            }
+                                            .onFailure {
+                                                screenshotTrigger = previous
+                                                error = it.message ?: "截图快捷键保存失败"
+                                            }
+                                    } finally {
+                                        updatingScreenshotTrigger = false
+                                    }
+                                }
+                            }
+                        },
+                    )
                     OutlinedTextField(
                         value = screenshotPrompt,
                         onValueChange = {
@@ -714,6 +801,7 @@ internal fun SettingsScreen(
                                     overlayBackgroundColor,
                                     overlayGlassEnabled,
                                     shortAnswerModeEnabled,
+                                    screenshotTrigger,
                                 )
                                     .onSuccess { error = null; saved = true; apiKey = "" }
                                     .onFailure { error = it.message ?: "保存失败"; saved = false }

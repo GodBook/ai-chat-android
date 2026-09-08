@@ -18,6 +18,8 @@ import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.model.ProviderConfig
 import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
 import com.example.aichat.data.model.DEFAULT_OVERLAY_GLASS_ENABLED
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
+import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.model.normalizeOverlayBackgroundColor
 import com.example.aichat.data.network.ChatClientException
 import com.example.aichat.data.repository.ChatRepository
@@ -438,6 +440,7 @@ class MainViewModel(
         overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
         overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
         shortAnswerModeEnabled: Boolean = false,
+        screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -473,6 +476,7 @@ class MainViewModel(
                 overlayBackgroundColor = normalizeOverlayBackgroundColor(overlayBackgroundColor),
                 overlayGlassEnabled = overlayGlassEnabled,
                 shortAnswerModeEnabled = shortAnswerModeEnabled,
+                screenshotTrigger = screenshotTrigger,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
@@ -492,6 +496,11 @@ class MainViewModel(
     suspend fun setShortAnswerModeEnabled(enabled: Boolean): Result<Unit> = runCatching {
         val current = configStore.read()
         configStore.update(current.copy(shortAnswerModeEnabled = enabled))
+    }
+
+    /** Persists the volume key shortcut immediately, without saving the rest of the form. */
+    suspend fun setScreenshotTrigger(trigger: ScreenshotTrigger): Result<Unit> = runCatching {
+        configStore.updateScreenshotTrigger(trigger)
     }
 
     /** Persists color and glass choices as soon as the user selects them. */

@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
+import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
 import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
+import com.example.aichat.data.model.ScreenshotTrigger
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -37,6 +39,7 @@ class ConfigStoreTest {
         assertEquals(DEFAULT_OVERLAY_BACKGROUND_COLOR, config.overlayBackgroundColor)
         assertFalse(config.overlayGlassEnabled)
         assertFalse(config.shortAnswerModeEnabled)
+        assertEquals(DEFAULT_SCREENSHOT_TRIGGER, config.screenshotTrigger)
     }
 
     @Test
@@ -50,6 +53,7 @@ class ConfigStoreTest {
             overlayBackgroundColor = "#DDF4E8",
             overlayGlassEnabled = true,
             shortAnswerModeEnabled = true,
+            screenshotTrigger = ScreenshotTrigger.VOLUME_UP_DOWN,
         )
 
         val config = store.read()
@@ -58,6 +62,25 @@ class ConfigStoreTest {
         assertEquals("#DDF4E8", config.overlayBackgroundColor)
         assertTrue(config.overlayGlassEnabled)
         assertTrue(config.shortAnswerModeEnabled)
+        assertEquals(ScreenshotTrigger.VOLUME_UP_DOWN, config.screenshotTrigger)
+    }
+
+    @Test
+    fun screenshotTriggerUpdatesImmediatelyWithoutChangingOtherSettings() = runBlocking {
+        store.update(
+            baseUrl = "https://api.example.test/v1",
+            model = "vision-model",
+            visionEnabled = true,
+            screenshotPrompt = "保留这条提示词",
+        )
+
+        store.updateScreenshotTrigger(ScreenshotTrigger.VOLUME_UP_DOWN)
+
+        val config = store.read()
+        assertEquals(ScreenshotTrigger.VOLUME_UP_DOWN, config.screenshotTrigger)
+        assertEquals("https://api.example.test/v1", config.baseUrl)
+        assertEquals("vision-model", config.model)
+        assertEquals("保留这条提示词", config.screenshotPrompt)
     }
 
     @Test
