@@ -34,6 +34,41 @@ fun modelCandidatesFor(model: String): List<String> {
     return listOf(primary, fallback)
 }
 
+/** A one-tap model choice offered in the settings screen. */
+data class ModelPreset(
+    /** Short name shown on the chip. */
+    val label: String,
+    /** Model id sent to the provider. */
+    val model: String,
+    /** Endpoint to switch to, or null to keep whatever the user already configured. */
+    val baseUrl: String? = null,
+)
+
+/** Presets keep DeepSeek first because it is the default provider. */
+val MODEL_PRESETS: List<ModelPreset> = listOf(
+    ModelPreset("V4.1 Flash 限时", DEFAULT_MODEL, DEFAULT_BASE_URL),
+    ModelPreset("V4 Flash 备用", FALLBACK_MODEL, DEFAULT_BASE_URL),
+    ModelPreset("DeepSeek Chat", "deepseek-chat", DEFAULT_BASE_URL),
+    ModelPreset("DeepSeek Reasoner", "deepseek-reasoner", DEFAULT_BASE_URL),
+    ModelPreset("GPT-4o mini", "gpt-4o-mini", "https://api.openai.com/v1"),
+    ModelPreset("GPT-4.1 mini", "gpt-4.1-mini", "https://api.openai.com/v1"),
+)
+
+private val PRESET_ENDPOINTS: Set<String> =
+    MODEL_PRESETS.mapNotNull { it.baseUrl?.trim()?.removeSuffix("/") }.toSet() +
+        DEFAULT_BASE_URL.trim().removeSuffix("/")
+
+/**
+ * True when a preset may replace the endpoint.
+ *
+ * A self-hosted gateway or another relay must survive picking a model, so only blank or
+ * stock endpoints follow the preset.
+ */
+fun canReplaceEndpointForPreset(baseUrl: String): Boolean {
+    val normalized = baseUrl.trim().removeSuffix("/")
+    return normalized.isEmpty() || normalized in PRESET_ENDPOINTS
+}
+
 /** Volume key combination that starts the background screenshot question flow. */
 enum class ScreenshotTrigger(
     /** Stable value persisted in DataStore. */

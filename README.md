@@ -24,7 +24,7 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 ## 开始使用
 
 1. 打开右上角的“设置”。
-2. 填写模型服务的 HTTPS Base URL、模型名称和 API Key；需要发送图片时开启“支持图片”。默认接口地址为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-v4.1-flash-expires-on-0910`；该模型不可用（例如过期）时会自动改用 `deepseek-v4-flash` 重试。
+2. 填写模型服务的 HTTPS Base URL、模型名称和 API Key；需要发送图片时开启“支持图片”。默认接口地址为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-v4.1-flash-expires-on-0910`；该模型不可用（例如过期）时会自动改用 `deepseek-v4-flash` 重试。模型名称下方的“快捷选择”可以一键填入常用模型（DeepSeek 系列、GPT-4o mini、GPT-4.1 mini），也可以直接在输入框里手写任意模型名；只有当你填的是官方默认地址时，快捷选择才会顺带切换接口地址，自建网关或中转站地址不会被覆盖。
 3. 点击“保存设置”，返回聊天列表并进入一个聊天。
 4. 输入文字或选择图片后发送。生成期间可点击停止按钮，失败或中断的回复可手动重试。
 

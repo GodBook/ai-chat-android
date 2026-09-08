@@ -41,6 +41,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
@@ -78,11 +79,41 @@ import com.example.aichat.BuildConfig
 import com.example.aichat.background.BackgroundScreenshotManager
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.FALLBACK_MODEL
+import com.example.aichat.data.model.MODEL_PRESETS
+import com.example.aichat.data.model.ModelPreset
+import com.example.aichat.data.model.canReplaceEndpointForPreset
 import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.OVERLAY_COLOR_PRESETS
 import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.update.InstallPreparation
 import kotlinx.coroutines.launch
+
+/** One-tap model choices. The text field above still accepts any model id. */
+@Composable
+private fun ModelPresetChips(
+    currentModel: String,
+    onPicked: (ModelPreset) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "快捷选择",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MODEL_PRESETS.forEach { preset ->
+                FilterChip(
+                    selected = currentModel.trim() == preset.model,
+                    onClick = { onPicked(preset) },
+                    label = { Text(preset.label) },
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun OverlayAppearanceSettings(
@@ -460,8 +491,19 @@ internal fun SettingsScreen(
                 onValueChange = { model = it; saved = false },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("模型名称") },
-                supportingText = { Text("默认模型失效时会自动改用 $FALLBACK_MODEL") },
+                supportingText = { Text("默认模型失效时会自动改用 $FALLBACK_MODEL，也可以直接在上面手写") },
                 singleLine = true,
+            )
+            ModelPresetChips(
+                currentModel = model,
+                onPicked = { preset ->
+                    model = preset.model
+                    val presetEndpoint = preset.baseUrl
+                    if (presetEndpoint != null && canReplaceEndpointForPreset(baseUrl)) {
+                        baseUrl = presetEndpoint
+                    }
+                    saved = false
+                },
             )
             OutlinedTextField(
                 value = apiKey,
