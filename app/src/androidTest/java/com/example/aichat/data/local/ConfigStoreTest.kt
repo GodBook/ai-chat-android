@@ -3,6 +3,8 @@ package com.example.aichat.data.local
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.aichat.data.model.DEFAULT_BASE_URL
+import com.example.aichat.data.model.FALLBACK_MODEL
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
 import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
@@ -137,5 +139,39 @@ class ConfigStoreTest {
         assertEquals("vision-model", config.model)
         assertFalse(config.visionEnabled)
         assertEquals("保留这条提示词", config.screenshotPrompt)
+    }
+
+    @Test
+    fun modelPresetUpdatesImmediatelyAndReplacesDefaultEndpoint() = runBlocking {
+        store.update(
+            baseUrl = DEFAULT_BASE_URL,
+            model = FALLBACK_MODEL,
+        )
+
+        store.updateModelPreset(
+            model = "gpt-4o-mini",
+            baseUrl = "https://api.openai.com/v1",
+        )
+
+        val config = store.read()
+        assertEquals("gpt-4o-mini", config.model)
+        assertEquals("https://api.openai.com/v1", config.baseUrl)
+    }
+
+    @Test
+    fun modelPresetPreservesCustomEndpoint() = runBlocking {
+        store.update(
+            baseUrl = "https://custom-gateway.mycorp.internal/v1",
+            model = FALLBACK_MODEL,
+        )
+
+        store.updateModelPreset(
+            model = "deepseek-reasoner",
+            baseUrl = DEFAULT_BASE_URL,
+        )
+
+        val config = store.read()
+        assertEquals("deepseek-reasoner", config.model)
+        assertEquals("https://custom-gateway.mycorp.internal/v1", config.baseUrl)
     }
 }

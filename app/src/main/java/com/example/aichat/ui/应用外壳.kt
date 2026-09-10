@@ -193,6 +193,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
                     onShortAnswerModeChanged = viewModel::setShortAnswerModeEnabled,
                     onAutoFallbackEnabledChanged = viewModel::setAutoFallbackEnabled,
+                    onModelPresetSelected = viewModel::selectModelPreset,
                     onScreenshotTriggerChanged = viewModel::setScreenshotTrigger,
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,

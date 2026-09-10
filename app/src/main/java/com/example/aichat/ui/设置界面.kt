@@ -3,6 +3,7 @@ package com.example.aichat.ui
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -292,6 +293,7 @@ internal fun SettingsScreen(
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
     onAutoFallbackEnabledChanged: suspend (Boolean) -> Result<Unit>,
+    onModelPresetSelected: suspend (ModelPreset) -> Result<Unit>,
     onScreenshotTriggerChanged: suspend (ScreenshotTrigger) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
@@ -456,6 +458,60 @@ internal fun SettingsScreen(
         }
     }
 
+    val performSave: suspend () -> Result<Unit> = {
+        saving = true
+        try {
+            onSave(
+                baseUrl,
+                model,
+                apiKey,
+                visionEnabled,
+                updateManifestUrl,
+                backgroundCaptureEnabled,
+                screenshotPrompt,
+                overlayBackgroundColor,
+                overlayGlassEnabled,
+                shortAnswerModeEnabled,
+                autoFallbackEnabled,
+                screenshotTrigger,
+            )
+                .onSuccess {
+                    error = null
+                    saved = true
+                    apiKey = ""
+                }
+                .onFailure {
+                    error = it.message ?: "保存失败"
+                    saved = false
+                }
+        } finally {
+            saving = false
+        }
+    }
+
+    fun handleExit() {
+        if (saving) return
+        val hasUnsavedChanges = !saved && (
+            baseUrl.trim() != state.config.baseUrl.trim() ||
+            model.trim() != state.config.model.trim() ||
+            apiKey.isNotBlank() ||
+            visionEnabled != state.config.visionEnabled ||
+            updateManifestUrl.trim() != state.updateManifestUrl.trim() ||
+            screenshotPrompt.trim() != state.config.screenshotPrompt.trim()
+        )
+        if (hasUnsavedChanges && error == null && model.trim().isNotBlank() && baseUrl.trim().isNotBlank()) {
+            scope.launch {
+                performSave().onSuccess {
+                    onBack()
+                }
+            }
+        } else {
+            onBack()
+        }
+    }
+
+    BackHandler(onBack = { handleExit() })
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -466,7 +522,7 @@ internal fun SettingsScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { handleExit() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -548,6 +604,16 @@ internal fun SettingsScreen(
                         baseUrl = presetEndpoint
                     }
                     saved = false
+                    scope.launch {
+                        onModelPresetSelected(preset)
+                            .onSuccess {
+                                error = null
+                                saved = true
+                            }
+                            .onFailure {
+                                error = it.message ?: "选择模型失败"
+                            }
+                    }
                 },
             )
             OutlinedTextField(
@@ -876,29 +942,7 @@ internal fun SettingsScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = {
-                        saving = true
-                        scope.launch {
-                            try {
-                                onSave(
-                                    baseUrl,
-                                    model,
-                                    apiKey,
-                                    visionEnabled,
-                                    updateManifestUrl,
-                                    backgroundCaptureEnabled,
-                                    screenshotPrompt,
-                                    overlayBackgroundColor,
-                                    overlayGlassEnabled,
-                                    shortAnswerModeEnabled,
-                                    autoFallbackEnabled,
-                                    screenshotTrigger,
-                                )
-                                    .onSuccess { error = null; saved = true; apiKey = "" }
-                                    .onFailure { error = it.message ?: "保存失败"; saved = false }
-                            } finally {
-                                saving = false
-                            }
-                        }
+                        scope.launch { performSave() }
                     },
                     enabled = !saving && !updatingOverlayAppearance,
                     modifier = Modifier.weight(1f),

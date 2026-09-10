@@ -16,6 +16,7 @@ import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
 import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.model.normalizeOverlayBackgroundColor
 import com.example.aichat.data.model.normalizeScreenshotTrigger
+import com.example.aichat.data.model.canReplaceEndpointForPreset
 import com.example.aichat.data.model.ProviderConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -106,6 +107,17 @@ class ConfigStore(context: Context) {
     /** Updates only the auto fallback switch so toggling it does not require saving the whole form. */
     suspend fun updateAutoFallbackEnabled(enabled: Boolean) {
         dataStore.edit { preferences -> preferences[AUTO_FALLBACK_ENABLED] = enabled }
+    }
+
+    /** Updates model and optionally endpoint when picking a preset chip. */
+    suspend fun updateModelPreset(model: String, baseUrl: String?) {
+        dataStore.edit { preferences ->
+            preferences[MODEL] = model.trim()
+            val currentBaseUrl = preferences[BASE_URL] ?: DEFAULT_BASE_URL
+            if (baseUrl != null && canReplaceEndpointForPreset(currentBaseUrl)) {
+                preferences[BASE_URL] = baseUrl.trim()
+            }
+        }
     }
 
     suspend fun reset() {

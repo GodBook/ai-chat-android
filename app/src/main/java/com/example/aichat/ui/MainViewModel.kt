@@ -19,6 +19,7 @@ import com.example.aichat.data.model.ProviderConfig
 import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
 import com.example.aichat.data.model.DEFAULT_OVERLAY_GLASS_ENABLED
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
+import com.example.aichat.data.model.ModelPreset
 import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.model.normalizeOverlayBackgroundColor
 import com.example.aichat.data.network.ChatClientException
@@ -503,6 +504,11 @@ class MainViewModel(
     /** Persists the auto fallback switch immediately, without saving the rest of the form. */
     suspend fun setAutoFallbackEnabled(enabled: Boolean): Result<Unit> = runCatching {
         configStore.updateAutoFallbackEnabled(enabled)
+    }
+
+    /** Persists a model preset choice immediately so picking a chip survives exiting settings. */
+    suspend fun selectModelPreset(preset: ModelPreset): Result<Unit> = runCatching {
+        configStore.updateModelPreset(preset.model, preset.baseUrl)
     }
 
     /** Persists the volume key shortcut immediately, without saving the rest of the form. */
