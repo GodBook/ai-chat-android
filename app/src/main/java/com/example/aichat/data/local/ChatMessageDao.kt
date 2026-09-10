@@ -43,6 +43,9 @@ interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages WHERE conversationId = :conversationId ORDER BY createdAt ASC, id ASC")
     suspend fun getForConversation(conversationId: String): List<ChatMessageEntity>
 
+    @Query("SELECT * FROM chat_messages WHERE conversationId IN (:conversationIds) ORDER BY createdAt ASC, id ASC")
+    suspend fun getForConversations(conversationIds: List<String>): List<ChatMessageEntity>
+
     @Query("SELECT * FROM chat_messages WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ChatMessageEntity?
 
@@ -79,4 +82,7 @@ interface ChatMessageDao {
 
     @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
     suspend fun deleteForConversation(conversationId: String): Int
+
+    @Query("DELETE FROM chat_messages WHERE conversationId IN (:conversationIds)")
+    suspend fun deleteForConversations(conversationIds: List<String>): Int
 }

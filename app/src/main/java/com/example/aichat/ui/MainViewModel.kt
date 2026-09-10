@@ -314,6 +314,46 @@ class MainViewModel(
         }
     }
 
+    fun deleteConversations(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        val currentSelectedId = selectedConversationId.value
+        val deletingSelected = currentSelectedId != null && currentSelectedId in ids
+        val generation = if (deletingSelected) {
+            conversationGeneration.incrementAndGet()
+        } else {
+            conversationGeneration.get()
+        }
+        val draftImages = if (deletingSelected) selectedImagePaths.value else emptyList()
+        if (deletingSelected) {
+            selectedImagePaths.value = emptyList()
+            draftToRestore.value = null
+        }
+        viewModelScope.launch {
+            try {
+                val count = repository.deleteConversations(ids)
+                if (count == 0) {
+                    if (deletingSelected) {
+                        restoreComposerImages(draftImages, currentSelectedId!!, generation)
+                    }
+                    transientMessage.value = "所选聊天不存在"
+                    return@launch
+                }
+                deleteComposerImages(draftImages)
+                if (deletingSelected && conversationGeneration.get() == generation) {
+                    selectedConversationId.value = repository.conversations.first().firstOrNull()?.id
+                }
+                transientMessage.value = "已删除 $count 个会话"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                if (deletingSelected) {
+                    restoreComposerImages(draftImages, currentSelectedId!!, generation)
+                }
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
     /** Builds an export off the UI thread, then lets the screen open the system share sheet. */
     fun exportConversation(id: String, onReady: (title: String, content: String) -> Unit) {
         viewModelScope.launch {
@@ -328,6 +368,35 @@ class MainViewModel(
                     ChatExportFormatter.format(conversation.title, messages)
                 }
                 onReady(conversation.title, content)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun exportConversations(ids: Set<String>, onReady: (title: String, content: String) -> Unit) {
+        if (ids.isEmpty()) {
+            transientMessage.value = "未选择任何会话"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val targets = withContext(Dispatchers.IO) {
+                    ids.mapNotNull { id ->
+                        val conv = repository.getConversation(id) ?: return@mapNotNull null
+                        val msgs = repository.observeMessages(id).first()
+                        conv to msgs
+                    }
+                }
+                if (targets.isEmpty()) {
+                    throw IllegalArgumentException("所选聊天不存在")
+                }
+                val content = withContext(Dispatchers.Default) {
+                    ChatExportFormatter.formatMultiple(targets.map { it.first.title to it.second })
+                }
+                onReady("批量导出聊天记录（共${targets.size}个会话）", content)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {

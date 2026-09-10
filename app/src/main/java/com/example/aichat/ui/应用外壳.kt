@@ -113,8 +113,14 @@ fun AiChatApp(viewModel: MainViewModel) {
                     },
                     onRenameConversation = viewModel::renameConversation,
                     onDeleteConversation = viewModel::deleteConversation,
+                    onDeleteConversations = viewModel::deleteConversations,
                     onExportConversation = { id ->
                         viewModel.exportConversation(id) { title, content ->
+                            shareConversation(context, title, content)
+                        }
+                    },
+                    onExportConversations = { ids ->
+                        viewModel.exportConversations(ids) { title, content ->
                             shareConversation(context, title, content)
                         }
                     },

@@ -345,6 +345,38 @@ class DefaultChatRepository(
         }
     }
 
+    override suspend fun deleteConversations(conversationIds: Collection<String>): Int {
+        val targetIds = conversationIds.map { normalizeConversationId(it) }.distinct()
+        if (targetIds.isEmpty()) return 0
+        targetIds.forEach { awaitActiveRequestIfNeeded(it) }
+        requestMutex.lock()
+        try {
+            val (deletedCount, removedMessages) = withContext(Dispatchers.IO) {
+                database.withTransaction {
+                    val messages = dao.getForConversations(targetIds).map { it.toDomain() }
+                    dao.deleteForConversations(targetIds)
+                    val count = conversationDao.deleteByIds(targetIds)
+                    if (conversationDao.count() == 0) {
+                        val now = System.currentTimeMillis()
+                        conversationDao.insert(
+                            ChatConversation(
+                                id = DEFAULT_CONVERSATION_ID,
+                                title = DEFAULT_CONVERSATION_TITLE,
+                                createdAt = now,
+                                updatedAt = now,
+                            ).toEntity(),
+                        )
+                    }
+                    count to messages
+                }
+            }
+            deleteUnreferencedMessageImages(removedMessages)
+            return deletedCount
+        } finally {
+            requestMutex.unlock()
+        }
+    }
+
     override suspend fun clearConversation() = clearConversation(DEFAULT_CONVERSATION_ID)
 
     override suspend fun clearConversation(conversationId: String) {

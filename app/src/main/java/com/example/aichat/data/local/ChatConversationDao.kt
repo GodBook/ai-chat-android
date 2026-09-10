@@ -36,6 +36,9 @@ interface ChatConversationDao {
     @Query("DELETE FROM chat_conversations WHERE id = :id")
     suspend fun deleteById(id: String): Int
 
+    @Query("DELETE FROM chat_conversations WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>): Int
+
     @Query("SELECT COUNT(*) FROM chat_conversations")
     suspend fun count(): Int
 }

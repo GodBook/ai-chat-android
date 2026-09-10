@@ -44,6 +44,8 @@ interface ChatRepository {
     suspend fun renameConversation(conversationId: String, title: String): ChatConversation? = null
 
     suspend fun deleteConversation(conversationId: String): Boolean = false
+ 
+    suspend fun deleteConversations(conversationIds: Collection<String>): Int = 0
 
     /** Inserts a user message and streams an assistant response. Returns the assistant id. */
     suspend fun sendMessage(text: String, imagePaths: List<String> = emptyList()): String
