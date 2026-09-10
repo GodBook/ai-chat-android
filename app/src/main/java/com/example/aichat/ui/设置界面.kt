@@ -9,10 +9,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,10 +30,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -69,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +95,71 @@ import com.example.aichat.data.model.OVERLAY_COLOR_PRESETS
 import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.update.InstallPreparation
 import kotlinx.coroutines.launch
+
+@Composable
+private fun SettingsCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun SettingsCardHeader(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Column {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
 
 /** One-tap model choices. The text field above still accepts any model id. */
 @Composable
@@ -522,10 +594,7 @@ internal fun SettingsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("连接设置", fontWeight = FontWeight.SemiBold)
-                        Text("AI BOTOY · v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Text("设置", fontWeight = FontWeight.SemiBold)
                 },
                 navigationIcon = {
                     IconButton(onClick = { handleExit() }) {
@@ -537,266 +606,308 @@ internal fun SettingsScreen(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         Column(
-            modifier = Modifier.padding(padding).padding(horizontal = 20.dp).fillMaxSize().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(Modifier.height(4.dp))
-            Text(
-                "模型连接",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it; saved = false },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("接口地址") },
-                supportingText = { Text("例如：https://api.deepseek.com/v1") },
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it; saved = false },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("模型名称") },
-                supportingText = { Text("可以点下方芯片快捷选择，也可以直接手写模型名") },
-                singleLine = true,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("模型失效自动回退", fontWeight = FontWeight.Medium)
-                    Text(
-                        "默认模型确认下线或过期时，自动改用 $FALLBACK_MODEL 重试一次；关闭后始终使用上面填写的模型",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            // 1. 模型与接口卡片
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.Tune,
+                    title = "模型与接口",
+                    subtitle = "配置 AI 对话的大模型与网络端点",
+                )
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it; saved = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("接口地址") },
+                    supportingText = { Text("例如：https://api.deepseek.com/v1") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it; saved = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("模型名称") },
+                    supportingText = { Text("可以点下方芯片快捷选择，也可以直接手写模型名") },
+                    singleLine = true,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("模型失效自动回退", fontWeight = FontWeight.Medium)
+                        Text(
+                            "默认模型确认下线或过期时，自动改用 $FALLBACK_MODEL 重试一次；关闭后始终使用上面填写的模型",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = autoFallbackEnabled,
+                        enabled = !saving && !updatingAutoFallback,
+                        onCheckedChange = { requested ->
+                            val previous = autoFallbackEnabled
+                            autoFallbackEnabled = requested
+                            saved = false
+                            updatingAutoFallback = true
+                            scope.launch {
+                                try {
+                                    onAutoFallbackEnabledChanged(requested)
+                                        .onSuccess {
+                                            error = null
+                                            saved = true
+                                        }
+                                        .onFailure {
+                                            autoFallbackEnabled = previous
+                                            error = it.message ?: "自动回退设置保存失败"
+                                        }
+                                } finally {
+                                    updatingAutoFallback = false
+                                }
+                            }
+                        },
                     )
                 }
-                Switch(
-                    checked = autoFallbackEnabled,
-                    enabled = !saving && !updatingAutoFallback,
-                    onCheckedChange = { requested ->
-                        val previous = autoFallbackEnabled
-                        autoFallbackEnabled = requested
+                ModelPresetChips(
+                    currentModel = model,
+                    onPicked = { preset ->
+                        model = preset.model
+                        val presetEndpoint = preset.baseUrl
+                        if (presetEndpoint != null && canReplaceEndpointForPreset(baseUrl)) {
+                            baseUrl = presetEndpoint
+                        }
                         saved = false
-                        updatingAutoFallback = true
                         scope.launch {
-                            try {
-                                onAutoFallbackEnabledChanged(requested)
+                            onModelPresetSelected(preset)
+                                .onSuccess {
+                                    error = null
+                                    saved = true
+                                }
+                                .onFailure {
+                                    error = it.message ?: "选择模型失败"
+                                }
+                        }
+                    },
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it; saved = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("API Key") },
+                    placeholder = { Text(if (state.hasApiKey) "已保存，输入新值可替换" else "粘贴你的 API Key") },
+                    singleLine = true,
+                    visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showKey = !showKey }) {
+                            Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = if (showKey) "隐藏密钥" else "显示密钥")
+                        }
+                    },
+                )
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp).padding(top = 2.dp),
+                        )
+                        Text(
+                            "API Key 仅加密保存在本机，并会直接发送给你填写的模型服务。请不要在不可信设备上分享应用或调试日志。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            // 2. 对话偏好卡片
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "对话偏好",
+                    subtitle = "多模态视觉与思维链展示设置",
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("支持图片", fontWeight = FontWeight.Medium)
+                        Text(
+                            "当前模型需要支持视觉输入",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = visionEnabled, onCheckedChange = { visionEnabled = it; saved = false })
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("自动折叠思考过程", fontWeight = FontWeight.Medium)
+                        Text(
+                            "生成完成后自动收起深度思考卡片，点击可随时展开查看思考链",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = autoCollapseThinking,
+                        onCheckedChange = { enabled ->
+                            autoCollapseThinking = enabled
+                            saved = false
+                            scope.launch {
+                                onAutoCollapseThinkingChanged(enabled)
                                     .onSuccess {
                                         error = null
                                         saved = true
                                     }
                                     .onFailure {
-                                        autoFallbackEnabled = previous
-                                        error = it.message ?: "自动回退设置保存失败"
+                                        error = it.message ?: "保存设置失败"
                                     }
-                            } finally {
-                                updatingAutoFallback = false
                             }
-                        }
-                    },
-                )
-            }
-            ModelPresetChips(
-                currentModel = model,
-                onPicked = { preset ->
-                    model = preset.model
-                    val presetEndpoint = preset.baseUrl
-                    if (presetEndpoint != null && canReplaceEndpointForPreset(baseUrl)) {
-                        baseUrl = presetEndpoint
-                    }
-                    saved = false
-                    scope.launch {
-                        onModelPresetSelected(preset)
-                            .onSuccess {
-                                error = null
-                                saved = true
-                            }
-                            .onFailure {
-                                error = it.message ?: "选择模型失败"
-                            }
-                    }
-                },
-            )
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it; saved = false },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API Key") },
-                placeholder = { Text(if (state.hasApiKey) "已保存，输入新值可替换" else "粘贴你的 API Key") },
-                singleLine = true,
-                visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { showKey = !showKey }) {
-                        Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = if (showKey) "隐藏密钥" else "显示密钥")
-                    }
-                },
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-            Text(
-                "聊天能力",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("支持图片", fontWeight = FontWeight.Medium)
-                    Text("当前模型需要支持视觉输入", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = visionEnabled, onCheckedChange = { visionEnabled = it; saved = false })
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("自动折叠思考过程", fontWeight = FontWeight.Medium)
-                    Text(
-                        "生成完成后自动收起深度思考卡片，点击可随时展开查看思考链",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        },
                     )
                 }
-                Switch(
-                    checked = autoCollapseThinking,
-                    onCheckedChange = { enabled ->
-                        autoCollapseThinking = enabled
-                        saved = false
-                        scope.launch {
-                            onAutoCollapseThinkingChanged(enabled)
-                                .onSuccess {
-                                    error = null
-                                    saved = true
-                                }
-                                .onFailure {
-                                    error = it.message ?: "保存设置失败"
-                                }
-                        }
-                    },
-                )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-            Text(
-                "后台助手",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("后台截图问答", fontWeight = FontWeight.Medium)
-                    Text(
-                        "开启后，应用在后台运行时按设置好的音量键会截取屏幕并发送给 AI；需要同时开启支持图片",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            // 3. 后台截屏助手卡片
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.SmartToy,
+                    title = "后台截图助手",
+                    subtitle = "息屏或在其他应用中快速识屏与答题",
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("后台截图问答", fontWeight = FontWeight.Medium)
+                        Text(
+                            "开启后，应用在后台运行时按设置好的音量键会截取屏幕并发送给 AI；需要同时开启支持图片",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = backgroundCaptureEnabled,
+                        enabled = !saving && !updatingBackgroundCapture,
+                        onCheckedChange = ::requestBackgroundCaptureChange,
                     )
                 }
-                Switch(
-                    checked = backgroundCaptureEnabled,
-                    enabled = !saving && !updatingBackgroundCapture,
-                    onCheckedChange = ::requestBackgroundCaptureChange,
-                )
-            }
-            OverlayAppearanceSettings(
-                backgroundColor = overlayBackgroundColor,
-                glassEnabled = overlayGlassEnabled,
-                enabled = !saving && !updatingOverlayAppearance,
-                onBackgroundColorChanged = { requestedColor ->
-                    val previousColor = overlayBackgroundColor
-                    overlayBackgroundColor = requestedColor
-                    saved = false
-                    updatingOverlayAppearance = true
-                    scope.launch {
-                        try {
-                            onOverlayAppearanceChanged(requestedColor, overlayGlassEnabled)
-                                .onSuccess {
-                                    error = null
-                                    saved = true
+                if (backgroundCaptureEnabled) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OverlayAppearanceSettings(
+                        backgroundColor = overlayBackgroundColor,
+                        glassEnabled = overlayGlassEnabled,
+                        enabled = !saving && !updatingOverlayAppearance,
+                        onBackgroundColorChanged = { requestedColor ->
+                            val previousColor = overlayBackgroundColor
+                            overlayBackgroundColor = requestedColor
+                            saved = false
+                            updatingOverlayAppearance = true
+                            scope.launch {
+                                try {
+                                    onOverlayAppearanceChanged(requestedColor, overlayGlassEnabled)
+                                        .onSuccess {
+                                            error = null
+                                            saved = true
+                                        }
+                                        .onFailure {
+                                            overlayBackgroundColor = previousColor
+                                            error = it.message ?: "悬浮回答外观保存失败"
+                                        }
+                                } finally {
+                                    updatingOverlayAppearance = false
                                 }
-                                .onFailure {
-                                    overlayBackgroundColor = previousColor
-                                    error = it.message ?: "悬浮回答外观保存失败"
-                                }
-                        } finally {
-                            updatingOverlayAppearance = false
-                        }
-                    }
-                },
-                onGlassChanged = { requestedGlass ->
-                    val previousGlass = overlayGlassEnabled
-                    overlayGlassEnabled = requestedGlass
-                    saved = false
-                    updatingOverlayAppearance = true
-                    scope.launch {
-                        try {
-                            onOverlayAppearanceChanged(overlayBackgroundColor, requestedGlass)
-                                .onSuccess {
-                                    error = null
-                                    saved = true
-                                }
-                                .onFailure {
-                                    overlayGlassEnabled = previousGlass
-                                    error = it.message ?: "悬浮回答外观保存失败"
-                                }
-                        } finally {
-                            updatingOverlayAppearance = false
-                        }
-                    }
-                },
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("选择/判断题简版回答模式", fontWeight = FontWeight.Medium)
-                    Text(
-                        "识别到选择题显示 A-D 方块（多选题会同时点亮多个），判断题左边为正确、右边为错误；只显示约 1 秒，不弹出文字回答",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = shortAnswerModeEnabled,
-                    enabled = !saving && !updatingShortAnswerMode,
-                    onCheckedChange = { requested ->
-                        val previous = shortAnswerModeEnabled
-                        shortAnswerModeEnabled = requested
-                        saved = false
-                        updatingShortAnswerMode = true
-                        scope.launch {
-                            try {
-                                onShortAnswerModeChanged(requested)
-                                    .onSuccess {
-                                        error = null
-                                        saved = true
-                                    }
-                                    .onFailure {
-                                        shortAnswerModeEnabled = previous
-                                        error = it.message ?: "简版回答设置保存失败"
-                                    }
-                            } finally {
-                                updatingShortAnswerMode = false
                             }
+                        },
+                        onGlassChanged = { requestedGlass ->
+                            val previousGlass = overlayGlassEnabled
+                            overlayGlassEnabled = requestedGlass
+                            saved = false
+                            updatingOverlayAppearance = true
+                            scope.launch {
+                                try {
+                                    onOverlayAppearanceChanged(overlayBackgroundColor, requestedGlass)
+                                        .onSuccess {
+                                            error = null
+                                            saved = true
+                                        }
+                                        .onFailure {
+                                            overlayGlassEnabled = previousGlass
+                                            error = it.message ?: "悬浮回答外观保存失败"
+                                        }
+                                } finally {
+                                    updatingOverlayAppearance = false
+                                }
+                            }
+                        },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("选择/判断题简版回答模式", fontWeight = FontWeight.Medium)
+                            Text(
+                                "识别到选择题显示 A-D 方块（多选题会同时点亮多个），判断题左边为正确、右边为错误；只显示约 1 秒，不弹出文字回答",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                    },
-                )
-            }
-            if (backgroundCaptureEnabled) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Switch(
+                            checked = shortAnswerModeEnabled,
+                            enabled = !saving && !updatingShortAnswerMode,
+                            onCheckedChange = { requested ->
+                                val previous = shortAnswerModeEnabled
+                                shortAnswerModeEnabled = requested
+                                saved = false
+                                updatingShortAnswerMode = true
+                                scope.launch {
+                                    try {
+                                        onShortAnswerModeChanged(requested)
+                                            .onSuccess {
+                                                error = null
+                                                saved = true
+                                            }
+                                            .onFailure {
+                                                shortAnswerModeEnabled = previous
+                                                error = it.message ?: "简版回答设置保存失败"
+                                            }
+                                    } finally {
+                                        updatingShortAnswerMode = false
+                                    }
+                                }
+                            },
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     ScreenshotTriggerSettings(
                         trigger = screenshotTrigger,
                         enabled = !saving && !updatingScreenshotTrigger,
@@ -853,28 +964,39 @@ internal fun SettingsScreen(
                             Text("恢复默认提示词")
                         }
                     }
-                    Text(
-                        if (usesAccessibilityScreenshot) {
-                            "开关会立即保存，只会由你手动关闭。请开启悬浮窗和音量监听，并在系统无障碍设置中选择“AI BOTOY”。Android 11 及以上由无障碍服务直接截图，不需要单独授权屏幕录制。"
-                        } else {
-                            "开关会立即保存，只会由你手动关闭。Android 10 还需授权屏幕捕获、悬浮窗和音量监听。屏幕捕获授权在应用进程被系统结束后需要重新授予。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        if (usesAccessibilityScreenshot) {
-                            "系统截图与音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}"
-                        } else {
-                            "屏幕捕获：${if (screenshotPermissionGranted) "已授权" else "未授权"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；通知：${if (notificationPermissionGranted) "已允许" else "未允许"}"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (backgroundPermissionsReady) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                if (usesAccessibilityScreenshot) {
+                                    "开关会立即保存，只会由你手动关闭。请开启悬浮窗和音量监听，并在系统无障碍设置中选择“AI BOTOY”。Android 11 及以上由无障碍服务直接截图，不需要单独授权屏幕录制。"
+                                } else {
+                                    "开关会立即保存，只会由你手动关闭。Android 10 还需授权屏幕捕获、悬浮窗和音量监听。屏幕捕获授权在应用进程被系统结束后需要重新授予。"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                if (usesAccessibilityScreenshot) {
+                                    "系统截图与音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}"
+                                } else {
+                                    "屏幕捕获：${if (screenshotPermissionGranted) "已授权" else "未授权"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；通知：${if (notificationPermissionGranted) "已允许" else "未允许"}"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = if (backgroundPermissionsReady) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                            )
+                        }
+                    }
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -928,67 +1050,197 @@ internal fun SettingsScreen(
                     }
                 }
             }
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.size(10.dp))
-                    Text("API Key 仅加密保存在本机，并会直接发送给你填写的模型服务。请不要在不可信设备上分享应用或调试日志。")
-                }
-            }
-            Text("在线更新", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = updateManifestUrl,
-                onValueChange = { updateManifestUrl = it; saved = false },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("更新清单地址") },
-                supportingText = { Text("HTTPS JSON，例如 https://你的域名/latest.json") },
-                singleLine = true,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OutlinedButton(
-                    onClick = { onCheckUpdate(updateManifestUrl) },
-                    enabled = state.updateState !is UpdateUiState.Checking && state.updateState !is UpdateUiState.Downloading,
-                    modifier = Modifier.weight(1f),
+
+            // 4. 关于与更新卡片
+            var showAdvancedUpdate by rememberSaveable { mutableStateOf(false) }
+
+            SettingsCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("检查更新")
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.SmartToy,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "AI BOTOY",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(6.dp),
+                                ) {
+                                    Text(
+                                        "v${BuildConfig.VERSION_NAME}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    )
+                                }
+                                Text(
+                                    "Build ${BuildConfig.VERSION_CODE}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { onCheckUpdate(updateManifestUrl) },
+                        enabled = state.updateState !is UpdateUiState.Checking && state.updateState !is UpdateUiState.Downloading,
+                    ) {
+                        if (state.updateState is UpdateUiState.Checking) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text("检查中…")
+                        } else {
+                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("检查更新")
+                        }
+                    }
                 }
+
                 when (val update = state.updateState) {
-                    is UpdateUiState.Checking -> CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                    is UpdateUiState.Downloading -> CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    is UpdateUiState.UpToDate -> {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                Text(
+                                    "当前已是最新版本（${update.latestVersionName}）",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+                    is UpdateUiState.Downloading -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text("正在下载更新…", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    is UpdateUiState.Error -> {
+                        Text(
+                            update.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     else -> Unit
                 }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showAdvancedUpdate = !showAdvancedUpdate }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        "高级配置（更新清单地址）",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Icon(
+                        imageVector = if (showAdvancedUpdate) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (showAdvancedUpdate) "收起" else "展开",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+
+                if (showAdvancedUpdate) {
+                    OutlinedTextField(
+                        value = updateManifestUrl,
+                        onValueChange = { updateManifestUrl = it; saved = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("更新清单地址") },
+                        supportingText = { Text("HTTPS JSON，例如 https://你的域名/latest.json") },
+                        singleLine = true,
+                    )
+                }
             }
-            when (val update = state.updateState) {
-                is UpdateUiState.UpToDate -> Text("当前已是最新版本（${update.latestVersionName}）", color = MaterialTheme.colorScheme.primary)
-                is UpdateUiState.Error -> Text(update.message, color = MaterialTheme.colorScheme.error)
-                else -> Unit
+
+            // 底部操作区与保存
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (saved) {
-                AssistChip(onClick = {}, label = { Text("已保存") }, leadingIcon = { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) })
+                AssistChip(
+                    onClick = {},
+                    label = { Text("设置已保存") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Button(
                     onClick = {
                         scope.launch { performSave() }
                     },
                     enabled = !saving && !updatingOverlayAppearance,
                     modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
                 ) {
-                    if (saving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Text("保存设置")
+                    if (saving) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    } else {
+                        Text("保存设置")
+                    }
                 }
                 if (state.hasApiKey) {
-                    OutlinedButton(onClick = { showDeleteKeyConfirmation = true }, enabled = !saving) { Text("删除密钥") }
+                    OutlinedButton(
+                        onClick = { showDeleteKeyConfirmation = true },
+                        enabled = !saving,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text("删除密钥")
+                    }
                 }
             }
             Text(
