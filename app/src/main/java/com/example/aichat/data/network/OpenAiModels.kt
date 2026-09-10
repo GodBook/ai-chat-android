@@ -18,6 +18,7 @@ internal data class ChunkChoice(
 @Serializable
 internal data class ChunkDelta(
     val content: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
 )
 
 @Serializable

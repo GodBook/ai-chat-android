@@ -27,15 +27,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -44,13 +55,18 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,10 +74,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -76,12 +94,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.aichat.data.model.ChatMessage
+import com.example.aichat.data.model.MODEL_PRESETS
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
+import com.example.aichat.data.model.ModelPreset
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,14 +117,24 @@ internal fun ChatScreen(
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onRetry: (String) -> Unit,
+    onRegenerate: (String) -> Unit,
+    onDeleteMessage: (String) -> Unit,
     onClear: () -> Unit,
     onDraftRestored: () -> Unit,
+    onSelectModelPreset: (ModelPreset) -> Unit,
+    onExport: () -> Unit,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
+    var messageToDelete by remember { mutableStateOf<String?>(null) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showModelMenu by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var shouldFollowTail by remember { mutableStateOf(true) }
     var automaticScrollDepth by remember { mutableIntStateOf(0) }
+    val isNearBottom by remember { derivedStateOf { listState.isNearBottom() } }
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri -> uri?.let(onImportImage) }
@@ -153,6 +185,7 @@ internal fun ChatScreen(
     LaunchedEffect(
         state.messages.lastOrNull()?.id,
         state.messages.lastOrNull()?.text?.length,
+        state.messages.lastOrNull()?.thinkingContent?.length,
         state.messages.lastOrNull()?.status,
     ) {
         if (state.messages.isEmpty()) return@LaunchedEffect
@@ -175,15 +208,72 @@ internal fun ChatScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        AiAvatar(size = 34.dp)
+                        AiAvatar(size = 36.dp)
                         Spacer(Modifier.size(10.dp))
                         Column {
-                            Text(state.selectedConversationTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                if (state.isWorking) "正在思考…" else "随时可以聊天",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = state.selectedConversationTitle,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleMedium,
                             )
+                            Box {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { showModelMenu = true }
+                                        .padding(vertical = 1.dp),
+                                ) {
+                                    val currentPreset = MODEL_PRESETS.firstOrNull { it.model == state.config.model }
+                                    Text(
+                                        text = currentPreset?.label ?: state.config.model,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "切换模型",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showModelMenu,
+                                    onDismissRequest = { showModelMenu = false },
+                                ) {
+                                    MODEL_PRESETS.forEach { preset ->
+                                        val isSelected = preset.model == state.config.model
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                ) {
+                                                    Text(
+                                                        preset.label,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    )
+                                                    if (isSelected) {
+                                                        Spacer(Modifier.size(8.dp))
+                                                        Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                showModelMenu = false
+                                                onSelectModelPreset(preset)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 },
@@ -193,13 +283,37 @@ internal fun ChatScreen(
                     }
                 },
                 actions = {
+                    Box {
+                        IconButton(onClick = { showMoreMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+                        }
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("导出聊天") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onExport()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("清空记录") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showClearConfirmation = true
+                                },
+                            )
+                        }
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                 ),
             )
         },
@@ -225,29 +339,63 @@ internal fun ChatScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
+        ) {
             if (state.messages.isEmpty()) {
-                EmptyConversation(modifier = Modifier.weight(1f))
+                EmptyConversation(modifier = Modifier.fillMaxSize())
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        MessageBubble(message = message, onRetry = { onRetry(message.id) })
+                        MessageBubble(
+                            message = message,
+                            isWorking = state.isWorking,
+                            autoCollapseThinking = state.config.autoCollapseThinking,
+                            onRetry = { onRetry(message.id) },
+                            onRegenerate = { onRegenerate(message.id) },
+                            onDelete = { messageToDelete = message.id },
+                            onEditPrompt = { prompt ->
+                                draft = prompt
+                            },
+                        )
                     }
                 }
             }
-            if (state.messages.isNotEmpty()) {
-                TextButton(
-                    onClick = { showClearConfirmation = true },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) {
-                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("清空聊天记录")
+
+            // Smart "Scroll to Bottom" Floating Action Button
+            AnimatedVisibility(
+                visible = !isNearBottom && state.messages.isNotEmpty(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 16.dp),
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
+            ) {
+                if (state.isWorking) {
+                    ExtendedFloatingActionButton(
+                        onClick = { coroutineScope.launch { scrollToTail(animated = true) } },
+                        icon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                        text = { Text("新内容生成中…", style = MaterialTheme.typography.labelMedium) },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        elevation = FloatingActionButtonDefaults.elevation(4.dp),
+                    )
+                } else {
+                    SmallFloatingActionButton(
+                        onClick = { coroutineScope.launch { scrollToTail(animated = true) } },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        elevation = FloatingActionButtonDefaults.elevation(3.dp),
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "回到底部")
+                    }
                 }
             }
         }
@@ -267,6 +415,23 @@ internal fun ChatScreen(
                 ) { Text("清空") }
             },
             dismissButton = { TextButton(onClick = { showClearConfirmation = false }) { Text("取消") } },
+        )
+    }
+
+    messageToDelete?.let { targetId ->
+        AlertDialog(
+            onDismissRequest = { messageToDelete = null },
+            title = { Text("删除此条消息？") },
+            text = { Text("删除后该条记录无法恢复。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        messageToDelete = null
+                        onDeleteMessage(targetId)
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { messageToDelete = null }) { Text("取消") } },
         )
     }
 }
@@ -375,6 +540,13 @@ private fun Composer(
                     maxLines = 5,
                     shape = RoundedCornerShape(20.dp),
                     enabled = !isWorking,
+                    trailingIcon = {
+                        if (draft.isNotBlank()) {
+                            IconButton(onClick = { onDraftChange("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "清空输入", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { if (draft.isNotBlank() || selectedImages.isNotEmpty()) onSend() }),
                 )
@@ -393,11 +565,24 @@ private fun Composer(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, onRetry: () -> Unit) {
+private fun MessageBubble(
+    message: ChatMessage,
+    isWorking: Boolean,
+    autoCollapseThinking: Boolean,
+    onRetry: () -> Unit,
+    onRegenerate: () -> Unit,
+    onDelete: () -> Unit,
+    onEditPrompt: (String) -> Unit,
+) {
     val isUser = message.role == MessageRole.USER
     val clipboard = LocalClipboardManager.current
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else Color.White
+    val bubbleColor = if (isUser) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
     val alignment = if (isUser) Alignment.End else Alignment.Start
+
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         Row(
             modifier = Modifier.widthIn(max = 360.dp),
@@ -410,56 +595,169 @@ private fun MessageBubble(message: ChatMessage, onRetry: () -> Unit) {
             }
             Card(
                 colors = CardDefaults.cardColors(containerColor = bubbleColor),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(
+                    topStart = if (isUser) 16.dp else 4.dp,
+                    topEnd = if (isUser) 4.dp else 16.dp,
+                    bottomStart = 16.dp,
+                    bottomEnd = 16.dp,
+                ),
                 border = if (isUser) null else androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 ),
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
+                    // Thinking process card (for DeepSeek Reasoner / R1)
+                    if (!isUser && (!message.thinkingContent.isNullOrBlank() || (message.status == MessageStatus.STREAMING && message.text.isBlank()))) {
+                        ThinkingCard(
+                            thinkingContent = message.thinkingContent.orEmpty(),
+                            isStreaming = message.status == MessageStatus.STREAMING && message.text.isBlank(),
+                            durationMs = message.thinkingDurationMs,
+                            autoCollapse = autoCollapseThinking,
+                        )
+                        if (message.text.isNotBlank()) Spacer(Modifier.height(10.dp))
+                    }
+
                     message.imagePaths.forEach { path ->
                         AsyncImage(
                             model = File(path),
                             contentDescription = "聊天图片",
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1.25f).clip(RoundedCornerShape(6.dp)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1.25f)
+                                .clip(RoundedCornerShape(8.dp)),
                             contentScale = ContentScale.Crop,
                         )
                         if (message.text.isNotBlank()) Spacer(Modifier.height(8.dp))
                     }
+
                     if (message.text.isNotBlank()) {
                         if (isUser) {
-                            Text(message.text)
+                            SelectionContainer {
+                                Text(
+                                    message.text,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
                         } else {
-                            // SelectionContainer gives Android's native long-press text selection
-                            // handles while preserving the rendered Markdown appearance.
                             SelectionContainer { MarkdownText(message.text) }
                         }
-                    } else if (message.status == MessageStatus.STREAMING || message.status == MessageStatus.SENDING) {
+                    } else if (message.status in setOf(MessageStatus.STREAMING, MessageStatus.SENDING) && message.thinkingContent.isNullOrBlank()) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+
+                    // Message Timestamp
+                    if (message.text.isNotBlank() || !message.thinkingContent.isNullOrBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = formatMessageTime(message.createdAt),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isUser) {
+                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            },
+                            fontSize = 10.sp,
+                            modifier = Modifier.align(Alignment.End),
+                        )
                     }
                 }
             }
         }
-        if (!isUser && message.status in setOf(MessageStatus.FAILED, MessageStatus.INTERRUPTED)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                Text(
-                    message.errorMessage ?: "生成失败",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-                TextButton(onClick = onRetry) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(3.dp))
-                    Text("重试")
+
+        // Action Toolbar below message bubble
+        if (isUser) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 2.dp, end = 4.dp),
+            ) {
+                IconButton(
+                    onClick = { onEditPrompt(message.text) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "编辑重发",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(message.text)) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "复制",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = "删除",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
                 }
             }
-        } else if (message.status == MessageStatus.SENT && message.text.isNotBlank()) {
-            TextButton(onClick = { clipboard.setText(AnnotatedString(message.text)) }) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.size(3.dp))
-                Text("复制", style = MaterialTheme.typography.labelSmall)
+        } else {
+            if (message.status in setOf(MessageStatus.FAILED, MessageStatus.INTERRUPTED)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp, start = 38.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        message.errorMessage ?: "生成失败",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                    TextButton(onClick = onRetry) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(3.dp))
+                        Text("重试")
+                    }
+                    TextButton(onClick = onDelete) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(3.dp))
+                        Text("删除")
+                    }
+                }
+            } else if (message.status == MessageStatus.SENT && message.text.isNotBlank()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 2.dp, start = 38.dp),
+                ) {
+                    TextButton(onClick = onRegenerate, enabled = !isWorking) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(3.dp))
+                        Text("重新生成", style = MaterialTheme.typography.labelSmall)
+                    }
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(message.text)) }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(3.dp))
+                        Text("复制", style = MaterialTheme.typography.labelSmall)
+                    }
+                    TextButton(onClick = onDelete) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(3.dp))
+                        Text("删除", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }

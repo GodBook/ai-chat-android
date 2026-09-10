@@ -288,11 +288,13 @@ internal fun SettingsScreen(
         Boolean,
         Boolean,
         ScreenshotTrigger,
+        Boolean,
     ) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
     onAutoFallbackEnabledChanged: suspend (Boolean) -> Result<Unit>,
+    onAutoCollapseThinkingChanged: suspend (Boolean) -> Result<Unit>,
     onModelPresetSelected: suspend (ModelPreset) -> Result<Unit>,
     onScreenshotTriggerChanged: suspend (ScreenshotTrigger) -> Result<Unit>,
     onDeleteKey: () -> Unit,
@@ -326,6 +328,9 @@ internal fun SettingsScreen(
     }
     var autoFallbackEnabled by rememberSaveable(state.config.autoFallbackEnabled) {
         mutableStateOf(state.config.autoFallbackEnabled)
+    }
+    var autoCollapseThinking by rememberSaveable(state.config.autoCollapseThinking) {
+        mutableStateOf(state.config.autoCollapseThinking)
     }
     var screenshotTrigger by rememberSaveable(state.config.screenshotTrigger) {
         mutableStateOf(state.config.screenshotTrigger)
@@ -474,6 +479,7 @@ internal fun SettingsScreen(
                 shortAnswerModeEnabled,
                 autoFallbackEnabled,
                 screenshotTrigger,
+                autoCollapseThinking,
             )
                 .onSuccess {
                     error = null
@@ -646,6 +652,37 @@ internal fun SettingsScreen(
                     Text("当前模型需要支持视觉输入", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(checked = visionEnabled, onCheckedChange = { visionEnabled = it; saved = false })
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("自动折叠思考过程", fontWeight = FontWeight.Medium)
+                    Text(
+                        "生成完成后自动收起深度思考卡片，点击可随时展开查看思考链",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = autoCollapseThinking,
+                    onCheckedChange = { enabled ->
+                        autoCollapseThinking = enabled
+                        saved = false
+                        scope.launch {
+                            onAutoCollapseThinkingChanged(enabled)
+                                .onSuccess {
+                                    error = null
+                                    saved = true
+                                }
+                                .onFailure {
+                                    error = it.message ?: "保存设置失败"
+                                }
+                        }
+                    },
+                )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
             Text(

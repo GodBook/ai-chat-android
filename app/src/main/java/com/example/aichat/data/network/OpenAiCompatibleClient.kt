@@ -46,6 +46,7 @@ class ChatClientException(
 
 sealed interface ChatStreamEvent {
     data class Delta(val text: String) : ChatStreamEvent
+    data class ThinkingDelta(val text: String) : ChatStreamEvent
     data object Done : ChatStreamEvent
 }
 
@@ -88,7 +89,7 @@ class OpenAiCompatibleClient(
             var emittedAnyText = false
             try {
                 streamChatOnce(config, model, messages).collect { event ->
-                    if (event is ChatStreamEvent.Delta) emittedAnyText = true
+                    if (event is ChatStreamEvent.Delta || event is ChatStreamEvent.ThinkingDelta) emittedAnyText = true
                     emit(event)
                 }
                 return@flow
@@ -134,6 +135,39 @@ class OpenAiCompatibleClient(
                 )
                 val source = body.source()
                 var done = false
+                var inThinkTag = false
+
+                suspend fun handleContentText(raw: String) {
+                    var remaining = raw
+                    while (remaining.isNotEmpty()) {
+                        if (!inThinkTag) {
+                            val thinkStart = remaining.indexOf("<think>")
+                            if (thinkStart != -1) {
+                                if (thinkStart > 0) {
+                                    emit(ChatStreamEvent.Delta(remaining.substring(0, thinkStart)))
+                                }
+                                inThinkTag = true
+                                remaining = remaining.substring(thinkStart + 7)
+                            } else {
+                                emit(ChatStreamEvent.Delta(remaining))
+                                remaining = ""
+                            }
+                        } else {
+                            val thinkEnd = remaining.indexOf("</think>")
+                            if (thinkEnd != -1) {
+                                if (thinkEnd > 0) {
+                                    emit(ChatStreamEvent.ThinkingDelta(remaining.substring(0, thinkEnd)))
+                                }
+                                inThinkTag = false
+                                remaining = remaining.substring(thinkEnd + 8)
+                            } else {
+                                emit(ChatStreamEvent.ThinkingDelta(remaining))
+                                remaining = ""
+                            }
+                        }
+                    }
+                }
+
                 suspend fun processEvent(data: String) {
                     if (data.isBlank()) return
                     if (data == "[DONE]") {
@@ -147,10 +181,14 @@ class OpenAiCompatibleClient(
                     chunk.error?.message?.takeIf { it.isNotBlank() }?.let { message ->
                         throw ChatClientException(ChatErrorKind.PROVIDER, message)
                     }
-                    chunk.choices.asSequence()
-                        .mapNotNull { choice -> choice.delta.content }
-                        .filter { content -> content.isNotEmpty() }
-                        .forEach { content -> emit(ChatStreamEvent.Delta(content)) }
+                    chunk.choices.forEach { choice ->
+                        choice.delta.reasoningContent?.takeIf { it.isNotEmpty() }?.let { reasoning ->
+                            emit(ChatStreamEvent.ThinkingDelta(reasoning))
+                        }
+                        choice.delta.content?.takeIf { it.isNotEmpty() }?.let { content ->
+                            handleContentText(content)
+                        }
+                    }
                 }
                 val parser = SseParser()
                 while (!source.exhausted()) {

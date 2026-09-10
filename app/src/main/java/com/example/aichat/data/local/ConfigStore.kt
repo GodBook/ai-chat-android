@@ -44,6 +44,7 @@ class ConfigStore(context: Context) {
             shortAnswerModeEnabled = preferences[SHORT_ANSWER_MODE_ENABLED] ?: false,
             autoFallbackEnabled = preferences[AUTO_FALLBACK_ENABLED] ?: true,
             screenshotTrigger = normalizeScreenshotTrigger(preferences[SCREENSHOT_TRIGGER]),
+            autoCollapseThinking = preferences[AUTO_COLLAPSE_THINKING] ?: true,
         )
     }
 
@@ -60,6 +61,7 @@ class ConfigStore(context: Context) {
         shortAnswerModeEnabled: Boolean = false,
         autoFallbackEnabled: Boolean = true,
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
+        autoCollapseThinking: Boolean = true,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -72,6 +74,7 @@ class ConfigStore(context: Context) {
             preferences[SHORT_ANSWER_MODE_ENABLED] = shortAnswerModeEnabled
             preferences[AUTO_FALLBACK_ENABLED] = autoFallbackEnabled
             preferences[SCREENSHOT_TRIGGER] = screenshotTrigger.storageKey
+            preferences[AUTO_COLLAPSE_THINKING] = autoCollapseThinking
         }
     }
 
@@ -86,6 +89,7 @@ class ConfigStore(context: Context) {
         shortAnswerModeEnabled = config.shortAnswerModeEnabled,
         autoFallbackEnabled = config.autoFallbackEnabled,
         screenshotTrigger = config.screenshotTrigger,
+        autoCollapseThinking = config.autoCollapseThinking,
     )
 
     /** Updates only overlay appearance so an immediate color choice cannot overwrite other settings. */
@@ -107,6 +111,11 @@ class ConfigStore(context: Context) {
     /** Updates only the auto fallback switch so toggling it does not require saving the whole form. */
     suspend fun updateAutoFallbackEnabled(enabled: Boolean) {
         dataStore.edit { preferences -> preferences[AUTO_FALLBACK_ENABLED] = enabled }
+    }
+
+    /** Updates the auto collapse thinking switch. */
+    suspend fun updateAutoCollapseThinking(enabled: Boolean) {
+        dataStore.edit { preferences -> preferences[AUTO_COLLAPSE_THINKING] = enabled }
     }
 
     /** Updates model and optionally endpoint when picking a preset chip. */
@@ -135,5 +144,6 @@ class ConfigStore(context: Context) {
         val SHORT_ANSWER_MODE_ENABLED = booleanPreferencesKey("short_answer_mode_enabled")
         val AUTO_FALLBACK_ENABLED = booleanPreferencesKey("auto_fallback_enabled")
         val SCREENSHOT_TRIGGER = stringPreferencesKey("screenshot_trigger")
+        val AUTO_COLLAPSE_THINKING = booleanPreferencesKey("auto_collapse_thinking")
     }
 }

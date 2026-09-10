@@ -150,6 +150,8 @@ data class ChatMessage(
     val errorMessage: String? = null,
     /** The chat this message belongs to. Legacy rows are assigned the default id. */
     val conversationId: String = DEFAULT_CONVERSATION_ID,
+    val thinkingContent: String? = null,
+    val thinkingDurationMs: Long? = null,
 )
 
 data class ProviderConfig(
@@ -171,6 +173,8 @@ data class ProviderConfig(
     val autoFallbackEnabled: Boolean = true,
     /** Volume key combination that starts the background screenshot flow. */
     val screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
+    /** Auto collapses the thinking process bubble when thinking finishes. */
+    val autoCollapseThinking: Boolean = true,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

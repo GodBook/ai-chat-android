@@ -6,15 +6,17 @@ import org.junit.Test
 
 class MessageMappersTest {
     @Test
-    fun `image paths survive Room json mapping`() {
+    fun `image paths and thinking fields survive Room json mapping`() {
         val original = ChatMessage(
             id = "message-1",
-            role = MessageRole.USER,
-            text = "看图",
+            role = MessageRole.ASSISTANT,
+            text = "看图回答",
             imagePaths = listOf("/data/user/0/app/chat-images/a.jpg", "/tmp/b.png"),
             status = MessageStatus.SENT,
             requestId = "request-1",
             createdAt = 123L,
+            thinkingContent = "我正在深度思考...",
+            thinkingDurationMs = 4500L,
         )
 
         assertEquals(original, original.toEntity().toDomain())

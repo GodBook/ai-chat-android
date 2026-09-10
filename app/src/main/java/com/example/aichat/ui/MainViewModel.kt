@@ -410,6 +410,47 @@ class MainViewModel(
         }
     }
 
+    fun regenerate(messageId: String) {
+        val conversationId = selectedConversationId.value ?: return
+        if (uiState.value.isWorking) {
+            transientMessage.value = "请先停止正在生成的回复"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                repository.regenerateMessage(conversationId, messageId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun deleteMessage(messageId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteMessage(messageId)
+                transientMessage.value = "消息已删除"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun switchModelPreset(preset: ModelPreset) {
+        viewModelScope.launch {
+            try {
+                configStore.updateModelPreset(preset.model, preset.baseUrl)
+                transientMessage.value = "已切换模型为 ${preset.label}"
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.message ?: "切换模型失败"
+            }
+        }
+    }
+
     fun clearConversation() {
         val conversationId = selectedConversationId.value ?: return
         val generation = conversationGeneration.incrementAndGet()
@@ -443,6 +484,7 @@ class MainViewModel(
         shortAnswerModeEnabled: Boolean = false,
         autoFallbackEnabled: Boolean = true,
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
+        autoCollapseThinking: Boolean = true,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -480,10 +522,16 @@ class MainViewModel(
                 shortAnswerModeEnabled = shortAnswerModeEnabled,
                 autoFallbackEnabled = autoFallbackEnabled,
                 screenshotTrigger = screenshotTrigger,
+                autoCollapseThinking = autoCollapseThinking,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
         }
+    }
+
+    /** Persists the auto collapse thinking switch immediately. */
+    suspend fun setAutoCollapseThinking(enabled: Boolean): Result<Unit> = runCatching {
+        configStore.updateAutoCollapseThinking(enabled)
     }
 
     /** Persists the background screenshot switch without requiring the rest of the form to be saved. */

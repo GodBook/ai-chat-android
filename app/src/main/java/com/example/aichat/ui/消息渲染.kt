@@ -52,6 +52,16 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 @Composable
 internal fun AiAvatar(size: androidx.compose.ui.unit.Dp) {
     Box(
@@ -60,6 +70,90 @@ internal fun AiAvatar(size: androidx.compose.ui.unit.Dp) {
     ) {
         Icon(Icons.Default.SmartToy, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
     }
+}
+
+@Composable
+internal fun ThinkingCard(
+    thinkingContent: String,
+    isStreaming: Boolean,
+    durationMs: Long?,
+    autoCollapse: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember(isStreaming, autoCollapse) {
+        mutableStateOf(if (isStreaming) true else !autoCollapse)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(
+            0.5.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        ),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = when {
+                            isStreaming -> "正在深度思考…"
+                            durationMs != null -> {
+                                val seconds = (durationMs / 1000).coerceAtLeast(1)
+                                "已深度思考 (${seconds}秒)"
+                            }
+                            else -> "已深度思考"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "收起思考过程" else "展开思考过程",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            if (expanded && thinkingContent.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(6.dp))
+                SelectionContainer {
+                    Text(
+                        text = thinkingContent.trim(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun formatMessageTime(createdAt: Long): String {
+    val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+    return formatter.format(Date(createdAt))
 }
 
 @Composable

@@ -60,6 +60,12 @@ interface ChatRepository {
 
     suspend fun retryMessage(conversationId: String, messageId: String): String? = retryMessage(messageId)
 
+    /** Regenerates an assistant message using preceding context. */
+    suspend fun regenerateMessage(conversationId: String, messageId: String): String? = null
+
+    /** Deletes a single message and cleans up any referenced images. */
+    suspend fun deleteMessage(messageId: String): Boolean = false
+
     /** Stops only the currently running model request. Partial text is kept. */
     fun stopGeneration()
 

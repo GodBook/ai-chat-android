@@ -26,4 +26,6 @@ data class ChatMessageEntity(
     val errorMessage: String? = null,
     @ColumnInfo(defaultValue = "'default'")
     val conversationId: String = "default",
+    val thinkingContent: String? = null,
+    val thinkingDurationMs: Long? = null,
 )

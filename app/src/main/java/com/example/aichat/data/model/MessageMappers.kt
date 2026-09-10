@@ -18,6 +18,8 @@ internal fun ChatMessageEntity.toDomain(): ChatMessage = ChatMessage(
     requestId = requestId,
     createdAt = createdAt,
     errorMessage = errorMessage,
+    thinkingContent = thinkingContent,
+    thinkingDurationMs = thinkingDurationMs,
 )
 
 internal fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
@@ -30,6 +32,8 @@ internal fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
     requestId = requestId,
     createdAt = createdAt,
     errorMessage = errorMessage,
+    thinkingContent = thinkingContent,
+    thinkingDurationMs = thinkingDurationMs,
 )
 
 internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversation(

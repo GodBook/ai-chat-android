@@ -131,8 +131,18 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onSend = viewModel::send,
                     onStop = viewModel::stop,
                     onRetry = viewModel::retry,
+                    onRegenerate = viewModel::regenerate,
+                    onDeleteMessage = viewModel::deleteMessage,
                     onClear = viewModel::clearConversation,
                     onDraftRestored = viewModel::clearDraftRestore,
+                    onSelectModelPreset = viewModel::switchModelPreset,
+                    onExport = {
+                        state.selectedConversationId?.let { id ->
+                            viewModel.exportConversation(id) { title, content ->
+                                shareConversation(context, title, content)
+                            }
+                        }
+                    },
                 )
             }
             composable(Routes.SETTINGS) {
@@ -152,6 +162,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             shortAnswerModeEnabled,
                             autoFallbackEnabled,
                             screenshotTrigger,
+                            autoCollapseThinking,
                         ->
                         viewModel.saveConfig(
                             baseUrl = baseUrl,
@@ -166,6 +177,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             shortAnswerModeEnabled = shortAnswerModeEnabled,
                             autoFallbackEnabled = autoFallbackEnabled,
                             screenshotTrigger = screenshotTrigger,
+                            autoCollapseThinking = autoCollapseThinking,
                         ).also { result ->
                             if (result.isSuccess) {
                                 if (backgroundEnabled) {
@@ -193,6 +205,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
                     onShortAnswerModeChanged = viewModel::setShortAnswerModeEnabled,
                     onAutoFallbackEnabledChanged = viewModel::setAutoFallbackEnabled,
+                    onAutoCollapseThinkingChanged = viewModel::setAutoCollapseThinking,
                     onModelPresetSelected = viewModel::selectModelPreset,
                     onScreenshotTriggerChanged = viewModel::setScreenshotTrigger,
                     onDeleteKey = viewModel::deleteApiKey,

@@ -68,6 +68,12 @@ interface ChatMessageDao {
     @Delete
     suspend fun delete(message: ChatMessageEntity)
 
+    @Query("DELETE FROM chat_messages WHERE id = :id")
+    suspend fun deleteById(id: String): Int
+
+    @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId AND createdAt >= :fromCreatedAt")
+    suspend fun deleteMessagesFrom(conversationId: String, fromCreatedAt: Long): Int
+
     @Query("DELETE FROM chat_messages")
     suspend fun deleteAll()
 

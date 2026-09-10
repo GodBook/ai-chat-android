@@ -201,6 +201,8 @@ class DefaultChatRepository(
             .plus(user.toRequestMessage()))
         val pending = target.copy(
             text = "",
+            thinkingContent = null,
+            thinkingDurationMs = null,
             status = MessageStatus.SENDING,
             errorMessage = null,
         )
@@ -211,6 +213,61 @@ class DefaultChatRepository(
         val completed = runGenerationInChild(this, config, history, pending)
         completed.throwIfUnsuccessful()
         pending.id
+    }
+
+    override suspend fun regenerateMessage(
+        conversationId: String,
+        messageId: String,
+    ): String? = withRequestLock {
+        val selectedConversationId = normalizeConversationId(conversationId)
+        ensureConversation(selectedConversationId)
+        val target = dao.getById(messageId)?.toDomain() ?: return@withRequestLock null
+        if (target.role != MessageRole.ASSISTANT || target.conversationId != selectedConversationId) {
+            return@withRequestLock null
+        }
+        val config = readProviderConfig()
+        client.validateConfig(config)
+        val all = dao.getForConversation(selectedConversationId).map { it.toDomain() }
+        val user = target.requestId?.let { requestId ->
+            all.firstOrNull { it.requestId == requestId && it.role == MessageRole.USER }
+        } ?: all.lastOrNull { it.role == MessageRole.USER && it.createdAt < target.createdAt }
+            ?: return@withRequestLock null
+        if (user.imagePaths.isNotEmpty() && !config.visionEnabled) {
+            throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
+        }
+        val userIndex = all.indexOfFirst { it.id == user.id }
+        val history = limitContext(all.take(userIndex.coerceAtLeast(0))
+            .filter { it.status == MessageStatus.SENT }
+            .map { it.toRequestMessage() }
+            .plus(user.toRequestMessage()))
+        val pending = target.copy(
+            text = "",
+            thinkingContent = null,
+            thinkingDurationMs = null,
+            status = MessageStatus.SENDING,
+            errorMessage = null,
+        )
+        database.withTransaction {
+            dao.update(pending.toEntity())
+            conversationDao.touch(selectedConversationId, System.currentTimeMillis())
+        }
+        val completed = runGenerationInChild(this, config, history, pending)
+        completed.throwIfUnsuccessful()
+        pending.id
+    }
+
+    override suspend fun deleteMessage(messageId: String): Boolean = withContext(Dispatchers.IO) {
+        val target = dao.getById(messageId)?.toDomain() ?: return@withContext false
+        if (target.imagePaths.isNotEmpty()) {
+            target.imagePaths.forEach { path ->
+                runCatching { imageFileStore.delete(path) }
+            }
+        }
+        val deleted = dao.deleteById(messageId) > 0
+        if (deleted) {
+            conversationDao.touch(target.conversationId, System.currentTimeMillis())
+        }
+        deleted
     }
 
     override fun stopGeneration() {
@@ -414,23 +471,32 @@ class DefaultChatRepository(
             stopRequestedFor = null
             child = parentScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 val responseText = StringBuilder()
+                val thinkingText = StringBuilder()
+                val thinkingStart = System.currentTimeMillis()
+                var thinkingDurationMs: Long? = null
                 var lastPersistedLength = 0
+                var lastPersistedThinkingLength = 0
                 var lastPersistedAt = 0L
                 var generationCompleted = false
 
                 suspend fun persistStreamingText() {
                     val now = System.nanoTime() / NANOS_PER_MILLISECOND
-                    val enoughText = responseText.length - lastPersistedLength >= STREAM_PERSIST_MIN_DELTA_CHARS
+                    val totalLen = responseText.length + thinkingText.length
+                    val lastTotalLen = lastPersistedLength + lastPersistedThinkingLength
+                    val enoughText = totalLen - lastTotalLen >= STREAM_PERSIST_MIN_DELTA_CHARS
                     val enoughTime = now - lastPersistedAt >= STREAM_PERSIST_INTERVAL_MS
                     if (!enoughText && !enoughTime) return
                     dao.update(
                         assistant.copy(
                             text = responseText.toString(),
+                            thinkingContent = thinkingText.toString().takeIf { it.isNotEmpty() },
+                            thinkingDurationMs = thinkingDurationMs,
                             status = MessageStatus.STREAMING,
                             errorMessage = null,
                         ).toEntity(),
                     )
                     lastPersistedLength = responseText.length
+                    lastPersistedThinkingLength = thinkingText.length
                     lastPersistedAt = now
                 }
 
@@ -438,19 +504,29 @@ class DefaultChatRepository(
                     dao.update(assistant.copy(status = MessageStatus.STREAMING).toEntity())
                     client.streamChat(config, history).collect { event ->
                         when (event) {
+                            is ChatStreamEvent.ThinkingDelta -> {
+                                thinkingText.append(event.text)
+                                persistStreamingText()
+                            }
+
                             is ChatStreamEvent.Delta -> {
+                                if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
+                                    thinkingDurationMs = System.currentTimeMillis() - thinkingStart
+                                }
                                 responseText.append(event.text)
                                 persistStreamingText()
                             }
 
                             ChatStreamEvent.Done -> {
-                                // Complete the terminal write without cancellation. A stop tap
-                                // that races with DONE is handled only after this block, so it
-                                // cannot leave a successfully generated answer in STREAMING.
+                                if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
+                                    thinkingDurationMs = System.currentTimeMillis() - thinkingStart
+                                }
                                 withContext(NonCancellable) {
                                     dao.update(
                                         assistant.copy(
                                             text = responseText.toString(),
+                                            thinkingContent = thinkingText.toString().takeIf { it.isNotEmpty() },
+                                            thinkingDurationMs = thinkingDurationMs,
                                             status = MessageStatus.SENT,
                                             errorMessage = null,
                                         ).toEntity(),
@@ -466,11 +542,16 @@ class DefaultChatRepository(
                         // The answer is already terminal; keep the SENT row even if the parent
                         // scope is cancelled while the collector is unwinding.
                     } else if (stopRequestedFor == assistant.id) {
+                        if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
+                            thinkingDurationMs = System.currentTimeMillis() - thinkingStart
+                        }
                         withContext(NonCancellable + Dispatchers.IO) {
                             val current = dao.getById(assistant.id)?.toDomain() ?: assistant
                             dao.update(
                                 current.copy(
                                     text = responseText.toString(),
+                                    thinkingContent = thinkingText.toString().takeIf { it.isNotEmpty() },
+                                    thinkingDurationMs = thinkingDurationMs,
                                     status = MessageStatus.INTERRUPTED,
                                     errorMessage = "已停止生成，可点击重试",
                                 ).toEntity(),
@@ -482,11 +563,16 @@ class DefaultChatRepository(
                     }
                 } catch (exception: ChatClientException) {
                     val interrupted = exception.kind == ChatErrorKind.STREAM_INTERRUPTED
+                    if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
+                        thinkingDurationMs = System.currentTimeMillis() - thinkingStart
+                    }
                     withContext(NonCancellable + Dispatchers.IO) {
                         val current = dao.getById(assistant.id)?.toDomain() ?: assistant
                         dao.update(
                             current.copy(
                                 text = responseText.toString(),
+                                thinkingContent = thinkingText.toString().takeIf { it.isNotEmpty() },
+                                thinkingDurationMs = thinkingDurationMs,
                                 status = if (interrupted) MessageStatus.INTERRUPTED else MessageStatus.FAILED,
                                 errorMessage = exception.message,
                             ).toEntity(),
@@ -494,11 +580,16 @@ class DefaultChatRepository(
                         conversationDao.touch(assistant.conversationId, System.currentTimeMillis())
                     }
                 } catch (exception: Exception) {
+                    if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
+                        thinkingDurationMs = System.currentTimeMillis() - thinkingStart
+                    }
                     withContext(NonCancellable + Dispatchers.IO) {
                         val current = dao.getById(assistant.id)?.toDomain() ?: assistant
                         dao.update(
                             current.copy(
                                 text = responseText.toString(),
+                                thinkingContent = thinkingText.toString().takeIf { it.isNotEmpty() },
+                                thinkingDurationMs = thinkingDurationMs,
                                 status = MessageStatus.FAILED,
                                 errorMessage = exception.message ?: "发送失败",
                             ).toEntity(),
