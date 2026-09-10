@@ -57,23 +57,23 @@ Write-Host "  AI BOTOY Local Build & Release Pipeline" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
 
 # 1. Environment: JDK 17
-if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
-    $candidateJdks = @(
-        "D:\dev\jdk-17",
-        "C:\Users\awxds\AppData\Local\Temp\aichat-jdk17-validation\jdk17\jdk-17.0.20.1+1",
-        "C:\Program Files\Java\jdk-17"
-    )
-    foreach ($jdk in $candidateJdks) {
-        if (Test-Path "$jdk\bin\java.exe") {
-            $env:JAVA_HOME = $jdk
-            $env:Path = $jdk + "\bin;" + $env:Path
-            Write-Host "[ENV] JAVA_HOME set to: $jdk" -ForegroundColor Green
-            break
-        }
+$candidateJdks = @(
+    "D:\dev\jdk-17",
+    "C:\Users\awxds\AppData\Local\Temp\aichat-jdk17-validation\jdk17\jdk-17.0.20.1+1",
+    "C:\Program Files\Java\jdk-17"
+)
+$foundJdk17 = $false
+foreach ($jdk in $candidateJdks) {
+    if (Test-Path "$jdk\bin\java.exe") {
+        $env:JAVA_HOME = $jdk
+        $env:Path = $jdk + "\bin;" + $env:Path
+        Write-Host "[ENV] JAVA_HOME set to: $jdk" -ForegroundColor Green
+        $foundJdk17 = $true
+        break
     }
 }
 
-if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
+if (-not $foundJdk17 -and (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME\bin\java.exe"))) {
     Write-Error "Valid JDK 17 not found. Please set `$env:JAVA_HOME or install JDK 17."
 }
 
