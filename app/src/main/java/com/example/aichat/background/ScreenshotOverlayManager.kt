@@ -165,7 +165,7 @@ class ScreenshotOverlayManager(context: Context) {
             elevation = dp(2).toFloat()
         }
         val icon = ImageView(appContext).apply {
-            setImageResource(R.drawable.ic_launcher_foreground)
+            setImageResource(R.mipmap.ic_launcher)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(4), dp(4), dp(4), dp(4))
             contentDescription = null

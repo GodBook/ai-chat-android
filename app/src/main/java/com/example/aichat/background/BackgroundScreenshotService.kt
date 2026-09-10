@@ -206,7 +206,7 @@ class BackgroundScreenshotService : Service() {
             )
         }
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("AI 截屏问答")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
