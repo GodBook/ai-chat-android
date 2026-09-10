@@ -371,6 +371,21 @@ class AppUpdateManager(
         return validated.delete()
     }
 
+    /**
+     * Deletes update APKs whose version is not above the running app, plus stale
+     * download temp files. Called at app startup, so an update that was just
+     * installed cleans itself up; a downloaded but not yet installed newer APK
+     * is kept.
+     */
+    fun deleteInstalledUpdateApks() {
+        val directory = updateDirectory
+        if (!directory.isDirectory) return
+        val names = directory.listFiles().orEmpty().filter { it.isFile }.map { it.name }
+        installedUpdateFileNames(names, currentVersionCode).forEach { name ->
+            runCatching { File(directory, name).delete() }
+        }
+    }
+
     private suspend fun resolveManifestUrl(override: String?): String {
         val candidate = override?.trim().orEmpty().ifEmpty {
             configStore.readManifestUrl().trim().ifEmpty {
@@ -607,4 +622,23 @@ class AppUpdateManager(
             }
         }
     }
+}
+
+/** Matches this manager's own files: `ai-chat-<versionCode>.apk` and their `.bak` backups. */
+private val UPDATE_APK_NAME_PATTERN = Regex("""ai-chat-(\d+)\.apk(\.bak)?""", RegexOption.IGNORE_CASE)
+
+/** Version code encoded in an update file name, or null for files this manager did not create. */
+internal fun parseUpdateApkVersionCode(fileName: String): Long? =
+    UPDATE_APK_NAME_PATTERN.matchEntire(fileName)?.groupValues?.get(1)?.toLongOrNull()
+
+/**
+ * Update-cache files that are safe to delete once the running app is at [currentVersionCode]:
+ * every APK (or backup) at that version or below, and any leftover download temp file.
+ */
+internal fun installedUpdateFileNames(
+    fileNames: List<String>,
+    currentVersionCode: Long,
+): List<String> = fileNames.filter { name ->
+    name.endsWith(".download.apk", ignoreCase = true) ||
+        parseUpdateApkVersionCode(name)?.let { it <= currentVersionCode } == true
 }

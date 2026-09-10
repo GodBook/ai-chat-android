@@ -24,7 +24,7 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 ## 开始使用
 
 1. 打开右上角的“设置”。
-2. 填写模型服务的 HTTPS Base URL、模型名称和 API Key；需要发送图片时开启“支持图片”。默认接口地址为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-v4.1-flash-expires-on-0910`；该模型不可用（例如过期）时会自动改用 `deepseek-v4-flash` 重试。模型名称下方的“快捷选择”可以一键填入常用模型（DeepSeek 系列、GPT-4o mini、GPT-4.1 mini），也可以直接在输入框里手写任意模型名；只有当你填的是官方默认地址时，快捷选择才会顺带切换接口地址，自建网关或中转站地址不会被覆盖。
+2. 填写模型服务的 HTTPS Base URL、模型名称和 API Key；需要发送图片时开启“支持图片”。默认接口地址为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-v4.1-flash-expires-on-0910`；只有服务端明确返回“模型不存在/已过期”一类错误时才会自动改用 `deepseek-v4-flash` 重试，普通请求错误不会切换模型。“模型失效自动回退”开关可以彻底关闭这一行为。模型名称下方的“快捷选择”可以一键填入常用模型（DeepSeek 系列、GPT-4o mini、GPT-4.1 mini），也可以直接在输入框里手写任意模型名；只有当你填的是官方默认地址时，快捷选择才会顺带切换接口地址，自建网关或中转站地址不会被覆盖。
 3. 点击“保存设置”，返回聊天列表并进入一个聊天。
 4. 输入文字或选择图片后发送。生成期间可点击停止按钮，失败或中断的回复可手动重试。
 
@@ -80,7 +80,7 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 4. 下载完成后点击“安装”，再按 Android 系统安装程序的提示确认更新。
 5. 如果系统要求“允许安装未知应用”，请为“AI BOTOY”开启该权限并返回；应用会继续发起安装。
 
-这是覆盖安装流程。更新成功后，Room 聊天记录、图片、DataStore 设置和 Keystore 中的 API Key 均会保留。
+这是覆盖安装流程。更新成功后，Room 聊天记录、图片、DataStore 设置和 Keystore 中的 API Key 均会保留；安装完成后再次启动应用时，会自动删除缓存里已经装入系统的更新安装包。
 
 > [!IMPORTANT]
 > 更新 APK 必须与已安装应用使用相同包名 `com.example.aichat` 和相同签名证书，其 `versionCode` 必须高于已安装版本。更新清单中的 `versionCode` 还必须与 APK 完全一致，否则应用会拒绝安装。

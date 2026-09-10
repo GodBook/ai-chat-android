@@ -285,6 +285,7 @@ internal fun SettingsScreen(
         String,
         Boolean,
         Boolean,
+        Boolean,
         ScreenshotTrigger,
     ) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
@@ -319,6 +320,9 @@ internal fun SettingsScreen(
     }
     var shortAnswerModeEnabled by rememberSaveable(state.config.shortAnswerModeEnabled) {
         mutableStateOf(state.config.shortAnswerModeEnabled)
+    }
+    var autoFallbackEnabled by rememberSaveable(state.config.autoFallbackEnabled) {
+        mutableStateOf(state.config.autoFallbackEnabled)
     }
     var screenshotTrigger by rememberSaveable(state.config.screenshotTrigger) {
         mutableStateOf(state.config.screenshotTrigger)
@@ -491,9 +495,28 @@ internal fun SettingsScreen(
                 onValueChange = { model = it; saved = false },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("模型名称") },
-                supportingText = { Text("默认模型失效时会自动改用 $FALLBACK_MODEL，也可以直接在上面手写") },
+                supportingText = { Text("可以点下方芯片快捷选择，也可以直接手写模型名") },
                 singleLine = true,
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("模型失效自动回退", fontWeight = FontWeight.Medium)
+                    Text(
+                        "默认模型确认下线或过期时，自动改用 $FALLBACK_MODEL 重试一次；关闭后始终使用上面填写的模型",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = autoFallbackEnabled,
+                    enabled = !saving,
+                    onCheckedChange = { autoFallbackEnabled = it; saved = false },
+                )
+            }
             ModelPresetChips(
                 currentModel = model,
                 onPicked = { preset ->
@@ -845,6 +868,7 @@ internal fun SettingsScreen(
                                     overlayBackgroundColor,
                                     overlayGlassEnabled,
                                     shortAnswerModeEnabled,
+                                    autoFallbackEnabled,
                                     screenshotTrigger,
                                 )
                                     .onSuccess { error = null; saved = true; apiKey = "" }

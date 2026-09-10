@@ -18,6 +18,10 @@ class AiChatApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // 更新安装完成后重启到这里：后台删掉已经装入系统的安装包缓存。
+        Thread { runCatching { container.updateManager.deleteInstalledUpdateApks() } }
+            .apply { isDaemon = true }
+            .start()
     }
 }
 

@@ -440,6 +440,7 @@ class MainViewModel(
         overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
         overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
         shortAnswerModeEnabled: Boolean = false,
+        autoFallbackEnabled: Boolean = true,
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
@@ -476,6 +477,7 @@ class MainViewModel(
                 overlayBackgroundColor = normalizeOverlayBackgroundColor(overlayBackgroundColor),
                 overlayGlassEnabled = overlayGlassEnabled,
                 shortAnswerModeEnabled = shortAnswerModeEnabled,
+                autoFallbackEnabled = autoFallbackEnabled,
                 screenshotTrigger = screenshotTrigger,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)

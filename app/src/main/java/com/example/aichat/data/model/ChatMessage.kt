@@ -167,6 +167,8 @@ data class ProviderConfig(
     val overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
     /** Shows only a one-second answer indicator for recognized choice/judgment questions. */
     val shortAnswerModeEnabled: Boolean = false,
+    /** Retries with [FALLBACK_MODEL] when the configured model is rejected as unavailable. */
+    val autoFallbackEnabled: Boolean = true,
     /** Volume key combination that starts the background screenshot flow. */
     val screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
 )

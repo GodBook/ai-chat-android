@@ -41,6 +41,7 @@ class ConfigStore(context: Context) {
             ),
             overlayGlassEnabled = preferences[OVERLAY_GLASS_ENABLED] ?: DEFAULT_OVERLAY_GLASS_ENABLED,
             shortAnswerModeEnabled = preferences[SHORT_ANSWER_MODE_ENABLED] ?: false,
+            autoFallbackEnabled = preferences[AUTO_FALLBACK_ENABLED] ?: true,
             screenshotTrigger = normalizeScreenshotTrigger(preferences[SCREENSHOT_TRIGGER]),
         )
     }
@@ -56,6 +57,7 @@ class ConfigStore(context: Context) {
         overlayBackgroundColor: String = DEFAULT_OVERLAY_BACKGROUND_COLOR,
         overlayGlassEnabled: Boolean = DEFAULT_OVERLAY_GLASS_ENABLED,
         shortAnswerModeEnabled: Boolean = false,
+        autoFallbackEnabled: Boolean = true,
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
     ) {
         dataStore.edit { preferences ->
@@ -67,6 +69,7 @@ class ConfigStore(context: Context) {
             preferences[OVERLAY_BACKGROUND_COLOR] = normalizeOverlayBackgroundColor(overlayBackgroundColor)
             preferences[OVERLAY_GLASS_ENABLED] = overlayGlassEnabled
             preferences[SHORT_ANSWER_MODE_ENABLED] = shortAnswerModeEnabled
+            preferences[AUTO_FALLBACK_ENABLED] = autoFallbackEnabled
             preferences[SCREENSHOT_TRIGGER] = screenshotTrigger.storageKey
         }
     }
@@ -80,6 +83,7 @@ class ConfigStore(context: Context) {
         overlayBackgroundColor = config.overlayBackgroundColor,
         overlayGlassEnabled = config.overlayGlassEnabled,
         shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+        autoFallbackEnabled = config.autoFallbackEnabled,
         screenshotTrigger = config.screenshotTrigger,
     )
 
@@ -112,6 +116,7 @@ class ConfigStore(context: Context) {
         val OVERLAY_BACKGROUND_COLOR = stringPreferencesKey("overlay_background_color")
         val OVERLAY_GLASS_ENABLED = booleanPreferencesKey("overlay_glass_enabled")
         val SHORT_ANSWER_MODE_ENABLED = booleanPreferencesKey("short_answer_mode_enabled")
+        val AUTO_FALLBACK_ENABLED = booleanPreferencesKey("auto_fallback_enabled")
         val SCREENSHOT_TRIGGER = stringPreferencesKey("screenshot_trigger")
     }
 }

@@ -78,7 +78,11 @@ class OpenAiCompatibleClient(
         config: ProviderConfig,
         messages: List<ChatRequestMessage>,
     ): Flow<ChatStreamEvent> = flow {
-        val candidates = modelCandidatesFor(config.model)
+        val candidates = if (config.autoFallbackEnabled) {
+            modelCandidatesFor(config.model)
+        } else {
+            listOf(config.model.trim())
+        }
         var firstFailure: ChatClientException? = null
         for ((index, model) in candidates.withIndex()) {
             var emittedAnyText = false
@@ -252,31 +256,46 @@ class OpenAiCompatibleClient(
 /** Status codes that can mean the requested model is gone, usually a 404 from the provider. */
 private val MODEL_UNAVAILABLE_STATUSES = setOf(null, 400, 403, 404, 422)
 
-private val MODEL_UNAVAILABLE_HINTS = listOf(
-    "model",
-    "模型",
+/** The message has to talk about the model... */
+private val MODEL_TOKENS = listOf("model", "模型")
+
+/** ...and say it is gone, unknown or off limits. */
+private val MODEL_UNAVAILABLE_TOKENS = listOf(
     "not found",
     "does not exist",
+    "not exist",
     "unknown",
     "invalid",
     "unavailable",
+    "not available",
+    "unsupported",
+    "not supported",
     "deprecated",
     "expired",
+    "no access",
     "不存在",
     "未知",
     "无效",
     "不可用",
-    "无权限",
+    "不支持",
     "过期",
     "下线",
+    "已失效",
+    "无权限",
 )
 
-/** True when the provider rejected the model itself rather than the request or the account. */
+/**
+ * True when the provider rejected the model itself rather than the request or the account.
+ *
+ * Both a model token and an unavailability token are required: a generic 400 such as
+ * "模型服务请求失败（HTTP 400）" or a key problem must not silently switch the model.
+ */
 private fun ChatClientException.isModelUnavailable(): Boolean {
     if (statusCode == 404) return true
     if (statusCode !in MODEL_UNAVAILABLE_STATUSES) return false
     val text = message.lowercase()
-    return MODEL_UNAVAILABLE_HINTS.any { hint -> text.contains(hint) }
+    return MODEL_TOKENS.any { text.contains(it) } &&
+        MODEL_UNAVAILABLE_TOKENS.any { text.contains(it) }
 }
 
 private class ChatCompletionsRequestBody(

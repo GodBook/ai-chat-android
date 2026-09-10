@@ -150,6 +150,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             overlayBackgroundColor,
                             overlayGlassEnabled,
                             shortAnswerModeEnabled,
+                            autoFallbackEnabled,
                             screenshotTrigger,
                         ->
                         viewModel.saveConfig(
@@ -163,6 +164,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             overlayBackgroundColor = overlayBackgroundColor,
                             overlayGlassEnabled = overlayGlassEnabled,
                             shortAnswerModeEnabled = shortAnswerModeEnabled,
+                            autoFallbackEnabled = autoFallbackEnabled,
                             screenshotTrigger = screenshotTrigger,
                         ).also { result ->
                             if (result.isSuccess) {

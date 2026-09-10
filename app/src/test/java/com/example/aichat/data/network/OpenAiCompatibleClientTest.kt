@@ -182,6 +182,79 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
+    fun `a generic request error does not switch to the fallback model`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setBody("{\"error\":{\"message\":\"请求参数无效\"}}"),
+        )
+        server.start()
+        try {
+            val client = OpenAiCompatibleClient(
+                imageFileStore = TestImageStore,
+                httpClient = OkHttpClient.Builder().build(),
+                allowInsecureHttp = true,
+            )
+            try {
+                client.streamChat(
+                    ProviderConfig(
+                        baseUrl = server.url("/v1").toString().removeSuffix("/"),
+                        model = DEFAULT_MODEL,
+                        apiKey = "test-key",
+                    ),
+                    listOf(ChatRequestMessage(MessageRole.USER, "hello")),
+                ).toList()
+                throw AssertionError("expected ChatClientException")
+            } catch (failure: ChatClientException) {
+                assertEquals("请求参数无效", failure.message)
+            }
+            server.takeRequest()
+            assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `disabling auto fallback keeps the configured model even when it is gone`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(404)
+                .setBody("{\"error\":{\"message\":\"model deepseek-v4.1-flash-expires-on-0910 not found\"}}"),
+        )
+        server.start()
+        try {
+            val client = OpenAiCompatibleClient(
+                imageFileStore = TestImageStore,
+                httpClient = OkHttpClient.Builder().build(),
+                allowInsecureHttp = true,
+            )
+            try {
+                client.streamChat(
+                    ProviderConfig(
+                        baseUrl = server.url("/v1").toString().removeSuffix("/"),
+                        model = DEFAULT_MODEL,
+                        apiKey = "test-key",
+                        autoFallbackEnabled = false,
+                    ),
+                    listOf(ChatRequestMessage(MessageRole.USER, "hello")),
+                ).toList()
+                throw AssertionError("expected ChatClientException")
+            } catch (failure: ChatClientException) {
+                assertEquals(404, failure.statusCode)
+            }
+            assertTrue(
+                server.takeRequest().body.readUtf8().contains("\"model\":\"$DEFAULT_MODEL\""),
+            )
+            assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `cancelling a blocked stream closes the HTTP call promptly`() = runBlocking {
         val server = MockWebServer()
         server.enqueue(
