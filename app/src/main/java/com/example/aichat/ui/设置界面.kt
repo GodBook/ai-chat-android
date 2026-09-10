@@ -32,15 +32,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -440,6 +449,13 @@ internal fun SettingsScreen(
     onCaptureNow: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
+    onTestConnection: (baseUrl: String, model: String, apiKey: String?) -> Unit = { _, _, _ -> },
+    onResetProbeState: () -> Unit = {},
+    onRefreshStorageStats: () -> Unit = {},
+    onCleanupOrphanImages: () -> Unit = {},
+    onExportBackup: (android.net.Uri) -> Unit = {},
+    onImportBackup: (android.net.Uri) -> Unit = {},
+    onResetBackupRestoreState: () -> Unit = {},
 ) {
     var baseUrl by rememberSaveable(state.config.baseUrl) { mutableStateOf(state.config.baseUrl) }
     var model by rememberSaveable(state.config.model) { mutableStateOf(state.config.model) }
@@ -797,6 +813,59 @@ internal fun SettingsScreen(
                         )
                     }
                 }
+
+                // 测试连接操作与状态反馈
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onTestConnection(baseUrl, model, apiKey)
+                        },
+                        enabled = !saving && state.probeState !is ProbeUiState.Probing && (apiKey.isNotBlank() || state.hasApiKey),
+                    ) {
+                        if (state.probeState is ProbeUiState.Probing) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("正在测试...")
+                        } else {
+                            Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("测试连接")
+                        }
+                    }
+
+                    if (state.probeState is ProbeUiState.Success) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "连接正常 · ${state.probeState.latencyMs}ms",
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                    } else if (state.probeState is ProbeUiState.Failure) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                state.probeState.message,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
             }
 
             // 2. 主题颜色卡片
@@ -1132,7 +1201,160 @@ internal fun SettingsScreen(
                 }
             }
 
-            // 4. 关于与更新卡片
+            // 4. 数据与存储卡片
+            val exportLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("application/zip"),
+            ) { uri ->
+                if (uri != null) onExportBackup(uri)
+            }
+            val importLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) onImportBackup(uri)
+            }
+
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.FolderZip,
+                    title = "数据与存储",
+                    subtitle = "全量数据备份、跨机恢复与存储清理",
+                )
+
+                // 存储占用面板
+                val stats = state.storageStats
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            "存储空间概览",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        val sizeFormatted = remember(stats?.imageSizeBytes) {
+                            val bytes = stats?.imageSizeBytes ?: 0L
+                            when {
+                                bytes >= 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f MB", bytes.toDouble() / (1024 * 1024))
+                                bytes >= 1024 -> String.format(Locale.getDefault(), "%.1f KB", bytes.toDouble() / 1024)
+                                else -> "$bytes B"
+                            }
+                        }
+                        Text(
+                            "已存会话：${stats?.conversationCount ?: 0} 个 · 消息记录：${stats?.messageCount ?: 0} 条",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "聊天与截图附件：${stats?.imageCount ?: 0} 张图片 · 占用空间约 $sizeFormatted",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // 备份状态反馈
+                if (state.backupRestoreState is BackupRestoreUiState.Processing) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text("正在处理备份数据...", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (state.backupRestoreState is BackupRestoreUiState.Success) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                state.backupRestoreState.message,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = onResetBackupRestoreState, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                } else if (state.backupRestoreState is BackupRestoreUiState.Error) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                state.backupRestoreState.message,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = onResetBackupRestoreState, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+
+                // 操作按钮行
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val timeStr = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                            exportLauncher.launch("ai_botoy_backup_$timeStr.zip")
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = state.backupRestoreState !is BackupRestoreUiState.Processing,
+                    ) {
+                        Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("导出备份")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = state.backupRestoreState !is BackupRestoreUiState.Processing,
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("恢复备份")
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onCleanupOrphanImages,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("清理无效图片缓存")
+                }
+            }
+
+            // 5. 关于与更新卡片
             var showAdvancedUpdate by rememberSaveable { mutableStateOf(false) }
 
             SettingsCard {

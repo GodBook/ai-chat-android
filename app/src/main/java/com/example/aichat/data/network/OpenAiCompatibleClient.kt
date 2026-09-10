@@ -7,11 +7,13 @@ import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.ProviderConfig
 import com.example.aichat.data.model.modelCandidatesFor
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -19,6 +21,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import java.io.File
 import java.io.IOException
@@ -49,6 +52,13 @@ sealed interface ChatStreamEvent {
     data class ThinkingDelta(val text: String) : ChatStreamEvent
     data object Done : ChatStreamEvent
 }
+
+data class ProbeResult(
+    val isSuccess: Boolean,
+    val latencyMs: Long,
+    val message: String,
+    val statusCode: Int? = null,
+)
 
 /** OpenAI /v1/chat/completions compatible streaming client. */
 class OpenAiCompatibleClient(
@@ -281,6 +291,63 @@ class OpenAiCompatibleClient(
             providerError?.message?.takeIf { it.isNotBlank() } ?: "无法解析模型服务的流式响应",
             cause = cause,
         )
+    }
+
+    suspend fun probeConnection(config: ProviderConfig): ProbeResult = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        try {
+            val endpoint = validateAndBuildEndpoint(config)
+            val probePayload = """{"model":${jsonQuote(config.model.trim())},"messages":[{"role":"user","content":"ping"}],"max_tokens":1,"stream":false}"""
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val requestBody = probePayload.toRequestBody(mediaType)
+            val request = Request.Builder()
+                .url(endpoint)
+                .addHeader("Authorization", "Bearer ${config.apiKey?.trim().orEmpty()}")
+                .post(requestBody)
+                .build()
+            val call = client.newCall(request)
+            call.execute().use { response ->
+                val latency = System.currentTimeMillis() - start
+                if (response.isSuccessful) {
+                    ProbeResult(
+                        isSuccess = true,
+                        latencyMs = latency,
+                        message = "连接成功（HTTP ${response.code}）",
+                        statusCode = response.code,
+                    )
+                } else {
+                    val errorBody = response.body?.string().orEmpty()
+                    val parsedError = parseHttpError(response.code, errorBody)
+                    ProbeResult(
+                        isSuccess = false,
+                        latencyMs = latency,
+                        message = parsedError.message,
+                        statusCode = response.code,
+                    )
+                }
+            }
+        } catch (e: ChatClientException) {
+            val latency = System.currentTimeMillis() - start
+            ProbeResult(
+                isSuccess = false,
+                latencyMs = latency,
+                message = e.message,
+                statusCode = e.statusCode,
+            )
+        } catch (e: Throwable) {
+            val latency = System.currentTimeMillis() - start
+            val friendlyMsg = when (e) {
+                is java.net.SocketTimeoutException -> "连接超时，请检查网络或接口地址"
+                is java.net.UnknownHostException -> "无法解析域名，请检查接口地址是否正确"
+                is java.net.ConnectException -> "连接被拒绝，无法访问目标服务器"
+                else -> "连接测试失败: ${e.localizedMessage ?: e.message ?: "网络异常"}"
+            }
+            ProbeResult(
+                isSuccess = false,
+                latencyMs = latency,
+                message = friendlyMsg,
+            )
+        }
     }
 
     private fun okhttp3.Call.cancellationSignal(parent: Job?): kotlinx.coroutines.CompletableJob =

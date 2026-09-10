@@ -9,6 +9,11 @@ import java.io.File
 import java.io.IOException
 import java.util.UUID
 
+data class ImageStorageStats(
+    val fileCount: Int,
+    val totalSizeBytes: Long,
+)
+
 interface ImageStore {
     fun mimeType(path: String): String
 }
@@ -53,6 +58,34 @@ class ImageFileStore(private val context: Context) : ImageStore {
             destination.delete()
             throw failure
         }
+    }
+
+    fun getImageDirectory(): File =
+        File(context.filesDir, IMAGE_DIRECTORY).apply { mkdirs() }
+
+    suspend fun getImageStorageStats(): ImageStorageStats = withContext(Dispatchers.IO) {
+        val dir = getImageDirectory()
+        val files = dir.listFiles()?.filter { it.isFile } ?: emptyList()
+        val totalSize = files.sumOf { it.length() }
+        ImageStorageStats(files.size, totalSize)
+    }
+
+    suspend fun cleanupOrphanImages(referencedPaths: Set<String>): Int = withContext(Dispatchers.IO) {
+        val dir = getImageDirectory()
+        val files = dir.listFiles()?.filter { it.isFile } ?: emptyList()
+        val canonicalReferenced = referencedPaths.mapNotNull { path ->
+            runCatching { File(path).canonicalPath }.getOrNull()
+        }.toSet()
+        var deletedCount = 0
+        for (file in files) {
+            val canonical = runCatching { file.canonicalPath }.getOrNull() ?: continue
+            if (canonical !in canonicalReferenced) {
+                if (file.delete()) {
+                    deletedCount++
+                }
+            }
+        }
+        deletedCount
     }
 
     override fun mimeType(path: String): String =

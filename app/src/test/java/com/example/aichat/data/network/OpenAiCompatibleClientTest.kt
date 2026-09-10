@@ -289,6 +289,69 @@ class OpenAiCompatibleClientTest {
         }
     }
 
+    @Test
+    fun `probeConnection returns success when server responds 200`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"pong\"}}]}"),
+        )
+        server.start()
+        try {
+            val client = OpenAiCompatibleClient(
+                imageFileStore = TestImageStore,
+                httpClient = OkHttpClient.Builder().build(),
+                allowInsecureHttp = true,
+            )
+            val result = client.probeConnection(
+                ProviderConfig(
+                    baseUrl = server.url("/v1").toString().removeSuffix("/"),
+                    model = "test-model",
+                    apiKey = "valid-key",
+                ),
+            )
+            assertTrue(result.isSuccess)
+            assertEquals(200, result.statusCode)
+            assertTrue(result.message.contains("连接成功"))
+            assertTrue(result.latencyMs >= 0)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `probeConnection returns failure when server returns 401`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"error\":{\"message\":\"Invalid API key provided\"}}"),
+        )
+        server.start()
+        try {
+            val client = OpenAiCompatibleClient(
+                imageFileStore = TestImageStore,
+                httpClient = OkHttpClient.Builder().build(),
+                allowInsecureHttp = true,
+            )
+            val result = client.probeConnection(
+                ProviderConfig(
+                    baseUrl = server.url("/v1").toString().removeSuffix("/"),
+                    model = "test-model",
+                    apiKey = "bad-key",
+                ),
+            )
+            org.junit.Assert.assertFalse(result.isSuccess)
+            assertEquals(401, result.statusCode)
+            assertTrue(result.message.contains("Invalid API key provided"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
     private object TestImageStore : ImageStore {
         override fun mimeType(path: String): String = "image/jpeg"
     }

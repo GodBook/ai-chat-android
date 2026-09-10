@@ -43,12 +43,15 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -58,6 +61,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -123,6 +127,8 @@ internal fun ChatScreen(
     onDraftRestored: () -> Unit,
     onSelectModelPreset: (ModelPreset) -> Unit,
     onExport: () -> Unit,
+    onExportMarkdown: () -> Unit = {},
+    onExportImage: (Boolean) -> Unit = {},
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -292,14 +298,33 @@ internal fun ChatScreen(
                             onDismissRequest = { showMoreMenu = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text("导出聊天") },
+                                text = { Text("生成对话长图 (PNG)") },
+                                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onExportImage(true)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导出 Markdown (.md)") },
+                                leadingIcon = { Icon(Icons.Default.Description, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onExportMarkdown()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导出纯文本 (TXT)") },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                                 onClick = {
                                     showMoreMenu = false
                                     onExport()
                                 },
                             )
+                            HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("清空记录") },
+                                text = { Text("清空记录", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showMoreMenu = false
                                     showClearConfirmation = true

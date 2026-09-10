@@ -159,6 +159,8 @@ fun AiChatApp(viewModel: MainViewModel) {
                             }
                         }
                     },
+                    onExportMarkdown = { viewModel.exportMarkdown(context) },
+                    onExportImage = { includeThinking -> viewModel.exportImage(context, includeThinking) },
                 )
             }
             composable(Routes.SETTINGS) {
@@ -246,6 +248,13 @@ fun AiChatApp(viewModel: MainViewModel) {
                     },
                     onOpenOverlaySettings = { BackgroundScreenshotManager.openOverlaySettings(context) },
                     onOpenAccessibilitySettings = { BackgroundScreenshotManager.openAccessibilitySettings(context) },
+                    onTestConnection = viewModel::testModelConnection,
+                    onResetProbeState = viewModel::resetProbeState,
+                    onRefreshStorageStats = viewModel::loadStorageStats,
+                    onCleanupOrphanImages = viewModel::cleanupOrphanImages,
+                    onExportBackup = { uri -> viewModel.exportBackup(context, uri) },
+                    onImportBackup = { uri -> viewModel.importBackup(context, uri) },
+                    onResetBackupRestoreState = viewModel::resetBackupRestoreState,
                 )
             }
         }

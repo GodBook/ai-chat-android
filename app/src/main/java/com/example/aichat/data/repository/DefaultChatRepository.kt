@@ -2,7 +2,9 @@ package com.example.aichat.data.repository
 
 import com.example.aichat.data.local.ApiKeyStore
 import com.example.aichat.data.local.ChatConversationDao
+import com.example.aichat.data.local.ChatConversationEntity
 import com.example.aichat.data.local.ChatMessageDao
+import com.example.aichat.data.local.ChatMessageEntity
 import com.example.aichat.data.local.ChatDatabase
 import com.example.aichat.data.local.ConfigStore
 import com.example.aichat.data.local.ImageFileStore
@@ -20,6 +22,7 @@ import com.example.aichat.data.network.ChatClientException
 import com.example.aichat.data.network.ChatErrorKind
 import com.example.aichat.data.network.ChatStreamEvent
 import com.example.aichat.data.network.OpenAiCompatibleClient
+import com.example.aichat.data.network.ProbeResult
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -472,6 +475,50 @@ class DefaultChatRepository(
                     )
                 }
         }
+    }
+
+    override suspend fun getAllConversations(): List<ChatConversation> = withContext(Dispatchers.IO) {
+        conversationDao.getAll().map { it.toDomain() }
+    }
+
+    override suspend fun getAllMessages(): List<ChatMessage> = withContext(Dispatchers.IO) {
+        dao.getAll().map { it.toDomain() }
+    }
+
+    override suspend fun getStorageStats(): AppStorageStats = withContext(Dispatchers.IO) {
+        val convCount = conversationDao.count()
+        val msgCount = dao.getAll().size
+        val imageStats = imageFileStore.getImageStorageStats()
+        AppStorageStats(
+            conversationCount = convCount,
+            messageCount = msgCount,
+            imageCount = imageStats.fileCount,
+            imageSizeBytes = imageStats.totalSizeBytes,
+        )
+    }
+
+    override suspend fun cleanupOrphanImages(): Int = withContext(Dispatchers.IO) {
+        val allReferenced = dao.getAll().asSequence()
+            .map { it.toDomain() }
+            .flatMap { it.imagePaths.asSequence() }
+            .toSet()
+        imageFileStore.cleanupOrphanImages(allReferenced)
+    }
+
+    override suspend fun restoreBackupData(
+        conversations: List<ChatConversationEntity>,
+        messages: List<ChatMessageEntity>,
+    ) {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                conversationDao.insertAll(conversations)
+                dao.insertAll(messages)
+            }
+        }
+    }
+
+    override suspend fun probeModelConnection(config: ProviderConfig): ProbeResult {
+        return client.probeConnection(config)
     }
 
     private suspend fun readProviderConfig(): ProviderConfig {

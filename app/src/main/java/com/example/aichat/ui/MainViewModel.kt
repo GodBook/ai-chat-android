@@ -1,5 +1,6 @@
 package com.example.aichat.ui
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -7,8 +8,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.aichat.AppContainer
 import com.example.aichat.BuildConfig
 import com.example.aichat.data.local.ApiKeyStore
+import com.example.aichat.data.local.BackupRestoreManager
 import com.example.aichat.data.local.ConfigStore
 import com.example.aichat.data.local.ImageFileStore
+import com.example.aichat.data.repository.AppStorageStats
+import com.example.aichat.ui.export.ChatImageExporter
+import com.example.aichat.ui.export.ChatMarkdownExporter
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
@@ -67,6 +72,20 @@ sealed interface UpdateUiState {
     data class Error(val message: String) : UpdateUiState
 }
 
+sealed interface ProbeUiState {
+    data object Idle : ProbeUiState
+    data object Probing : ProbeUiState
+    data class Success(val latencyMs: Long, val message: String) : ProbeUiState
+    data class Failure(val message: String) : ProbeUiState
+}
+
+sealed interface BackupRestoreUiState {
+    data object Idle : BackupRestoreUiState
+    data object Processing : BackupRestoreUiState
+    data class Success(val message: String) : BackupRestoreUiState
+    data class Error(val message: String) : BackupRestoreUiState
+}
+
 data class MainUiState(
     val conversations: List<ChatConversation> = emptyList(),
     val conversationPreviews: Map<String, ChatMessage> = emptyMap(),
@@ -84,6 +103,9 @@ data class MainUiState(
     val updateManifestUrl: String = "",
     val updateState: UpdateUiState = UpdateUiState.Idle,
     val collapsedGroups: Set<String> = emptySet(),
+    val storageStats: AppStorageStats? = null,
+    val probeState: ProbeUiState = ProbeUiState.Idle,
+    val backupRestoreState: BackupRestoreUiState = BackupRestoreUiState.Idle,
 )
 
 private data class ConversationSnapshot(
@@ -125,6 +147,9 @@ class MainViewModel(
     private val draftToRestore = MutableStateFlow<String?>(null)
     private val apiKeyAvailable = MutableStateFlow(runCatching { apiKeyStore.hasKey() }.getOrDefault(false))
     private val updateState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
+    private val probeState = MutableStateFlow<ProbeUiState>(ProbeUiState.Idle)
+    private val storageStats = MutableStateFlow<AppStorageStats?>(null)
+    private val backupRestoreState = MutableStateFlow<BackupRestoreUiState>(BackupRestoreUiState.Idle)
     private val conversationGeneration = AtomicLong(0)
 
     private val conversationSelection: Flow<ConversationSelection> = combine(
@@ -203,11 +228,21 @@ class MainViewModel(
         baseUiState,
         apiKeyAvailable,
         updateState,
-    ) { state, hasApiKey, update ->
-        state.copy(hasApiKey = hasApiKey, updateState = update)
+        probeState,
+        storageStats,
+    ) { state, hasApiKey, update, probe, stats ->
+        state.copy(
+            hasApiKey = hasApiKey,
+            updateState = update,
+            probeState = probe,
+            storageStats = stats,
+        )
+    }.combine(backupRestoreState) { state, backup ->
+        state.copy(backupRestoreState = backup)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     init {
+        loadStorageStats()
         viewModelScope.launch {
             repository.recoverInterruptedMessages()
             val existing = repository.conversations.first()
@@ -813,6 +848,143 @@ class MainViewModel(
 
     private fun ChatMessage.isGenerating(): Boolean =
         role == MessageRole.ASSISTANT && status in setOf(MessageStatus.SENDING, MessageStatus.STREAMING)
+
+    fun testModelConnection(baseUrl: String, model: String, apiKey: String?) {
+        viewModelScope.launch {
+            probeState.value = ProbeUiState.Probing
+            val config = ProviderConfig(
+                baseUrl = baseUrl,
+                model = model,
+                apiKey = apiKey,
+            )
+            val result = repository.probeModelConnection(config)
+            if (result.isSuccess) {
+                probeState.value = ProbeUiState.Success(result.latencyMs, result.message)
+            } else {
+                probeState.value = ProbeUiState.Failure(result.message)
+            }
+        }
+    }
+
+    fun resetProbeState() {
+        probeState.value = ProbeUiState.Idle
+    }
+
+    fun loadStorageStats() {
+        viewModelScope.launch {
+            storageStats.value = repository.getStorageStats()
+        }
+    }
+
+    fun cleanupOrphanImages() {
+        viewModelScope.launch {
+            val count = repository.cleanupOrphanImages()
+            loadStorageStats()
+            transientMessage.value = if (count > 0) "已清理 $count 张孤立图片" else "没有需要清理的孤立图片"
+        }
+    }
+
+    fun exportBackup(context: Context, targetUri: Uri) {
+        viewModelScope.launch {
+            backupRestoreState.value = BackupRestoreUiState.Processing
+            val convs = repository.getAllConversations()
+            val msgs = repository.getAllMessages()
+            val imgDir = imageFileStore.getImageDirectory()
+            val result = BackupRestoreManager.exportBackup(
+                context = context,
+                outputUri = targetUri,
+                conversations = convs,
+                messages = msgs,
+                imageDirectory = imgDir,
+                appVersion = BuildConfig.VERSION_NAME,
+                versionCode = BuildConfig.VERSION_CODE.toLong(),
+            )
+            result.fold(
+                onSuccess = { manifest ->
+                    backupRestoreState.value = BackupRestoreUiState.Success(
+                        "备份成功：已导出 ${manifest.conversationCount} 个会话、${manifest.messageCount} 条消息及 ${manifest.imageCount} 张图片",
+                    )
+                    loadStorageStats()
+                },
+                onFailure = { error ->
+                    backupRestoreState.value = BackupRestoreUiState.Error(
+                        error.localizedMessage ?: "备份导出失败",
+                    )
+                },
+            )
+        }
+    }
+
+    fun importBackup(context: Context, sourceUri: Uri) {
+        viewModelScope.launch {
+            backupRestoreState.value = BackupRestoreUiState.Processing
+            val existing = repository.getAllConversations().map { it.id }.toSet()
+            val imgDir = imageFileStore.getImageDirectory()
+            val result = BackupRestoreManager.importBackup(
+                context = context,
+                inputUri = sourceUri,
+                imageDirectory = imgDir,
+                existingConversationIds = existing,
+                onInsertData = { convs, msgs ->
+                    repository.restoreBackupData(convs, msgs)
+                },
+            )
+            result.fold(
+                onSuccess = { summary ->
+                    backupRestoreState.value = BackupRestoreUiState.Success(
+                        "恢复成功：已恢复 ${summary.conversationCount} 个会话、${summary.messageCount} 条消息及 ${summary.imageCount} 张图片",
+                    )
+                    loadStorageStats()
+                },
+                onFailure = { error ->
+                    backupRestoreState.value = BackupRestoreUiState.Error(
+                        error.localizedMessage ?: "备份恢复失败",
+                    )
+                },
+            )
+        }
+    }
+
+    fun resetBackupRestoreState() {
+        backupRestoreState.value = BackupRestoreUiState.Idle
+    }
+
+    fun exportMarkdown(context: Context) {
+        viewModelScope.launch {
+            val state = uiState.value
+            val convTitle = state.selectedConversationTitle
+            val messages = state.messages
+            val modelName = state.config.model
+            val result = ChatMarkdownExporter.exportAndShareMarkdown(
+                context = context,
+                conversationTitle = convTitle,
+                messages = messages,
+                modelName = modelName,
+            )
+            result.onFailure {
+                transientMessage.value = "导出 Markdown 失败: ${it.localizedMessage ?: "未知错误"}"
+            }
+        }
+    }
+
+    fun exportImage(context: Context, includeThinking: Boolean = true) {
+        viewModelScope.launch {
+            val state = uiState.value
+            val convTitle = state.selectedConversationTitle
+            val messages = state.messages
+            val modelName = state.config.model
+            val result = ChatImageExporter.exportAndShareImage(
+                context = context,
+                conversationTitle = convTitle,
+                messages = messages,
+                modelName = modelName,
+                includeThinking = includeThinking,
+            )
+            result.onFailure {
+                transientMessage.value = "生成长图失败: ${it.localizedMessage ?: "未知错误"}"
+            }
+        }
+    }
 
     private fun Throwable.userFacingMessage(): String = when (this) {
         is ChatClientException -> message

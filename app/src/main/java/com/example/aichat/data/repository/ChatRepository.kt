@@ -1,12 +1,23 @@
 package com.example.aichat.data.repository
 
+import com.example.aichat.data.local.ChatConversationEntity
+import com.example.aichat.data.local.ChatMessageEntity
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 import com.example.aichat.data.model.MessageStatus
+import com.example.aichat.data.model.ProviderConfig
+import com.example.aichat.data.network.ProbeResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
+
+data class AppStorageStats(
+    val conversationCount: Int,
+    val messageCount: Int,
+    val imageCount: Int,
+    val imageSizeBytes: Long,
+)
 
 interface ChatRepository {
     /** All saved chats, ordered by most recently changed. */
@@ -92,4 +103,20 @@ interface ChatRepository {
     suspend fun recoverInterruptedMessages(conversationId: String) {
         recoverInterruptedMessages()
     }
+
+    suspend fun getAllConversations(): List<ChatConversation> = emptyList()
+
+    suspend fun getAllMessages(): List<ChatMessage> = emptyList()
+
+    suspend fun getStorageStats(): AppStorageStats = AppStorageStats(0, 0, 0, 0L)
+
+    suspend fun cleanupOrphanImages(): Int = 0
+
+    suspend fun restoreBackupData(
+        conversations: List<ChatConversationEntity>,
+        messages: List<ChatMessageEntity>,
+    ) {}
+
+    suspend fun probeModelConnection(config: ProviderConfig): ProbeResult =
+        ProbeResult(false, 0L, "未实现")
 }
