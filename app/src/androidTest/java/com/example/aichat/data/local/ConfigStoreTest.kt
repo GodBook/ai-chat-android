@@ -118,4 +118,24 @@ class ConfigStoreTest {
         assertFalse(config.visionEnabled)
         assertEquals("保留这条提示词", config.screenshotPrompt)
     }
+
+    @Test
+    fun autoFallbackEnabledUpdatesImmediatelyWithoutChangingOtherSettings() = runBlocking {
+        store.update(
+            baseUrl = "https://api.example.test/v1",
+            model = "vision-model",
+            visionEnabled = false,
+            autoFallbackEnabled = true,
+            screenshotPrompt = "保留这条提示词",
+        )
+
+        store.updateAutoFallbackEnabled(false)
+
+        val config = store.read()
+        assertFalse(config.autoFallbackEnabled)
+        assertEquals("https://api.example.test/v1", config.baseUrl)
+        assertEquals("vision-model", config.model)
+        assertFalse(config.visionEnabled)
+        assertEquals("保留这条提示词", config.screenshotPrompt)
+    }
 }

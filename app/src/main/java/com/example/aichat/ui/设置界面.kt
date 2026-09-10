@@ -291,6 +291,7 @@ internal fun SettingsScreen(
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
+    onAutoFallbackEnabledChanged: suspend (Boolean) -> Result<Unit>,
     onScreenshotTriggerChanged: suspend (ScreenshotTrigger) -> Result<Unit>,
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
@@ -335,6 +336,7 @@ internal fun SettingsScreen(
     var updatingBackgroundCapture by remember { mutableStateOf(false) }
     var updatingOverlayAppearance by remember { mutableStateOf(false) }
     var updatingShortAnswerMode by remember { mutableStateOf(false) }
+    var updatingAutoFallback by remember { mutableStateOf(false) }
     var updatingScreenshotTrigger by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -513,8 +515,28 @@ internal fun SettingsScreen(
                 }
                 Switch(
                     checked = autoFallbackEnabled,
-                    enabled = !saving,
-                    onCheckedChange = { autoFallbackEnabled = it; saved = false },
+                    enabled = !saving && !updatingAutoFallback,
+                    onCheckedChange = { requested ->
+                        val previous = autoFallbackEnabled
+                        autoFallbackEnabled = requested
+                        saved = false
+                        updatingAutoFallback = true
+                        scope.launch {
+                            try {
+                                onAutoFallbackEnabledChanged(requested)
+                                    .onSuccess {
+                                        error = null
+                                        saved = true
+                                    }
+                                    .onFailure {
+                                        autoFallbackEnabled = previous
+                                        error = it.message ?: "自动回退设置保存失败"
+                                    }
+                            } finally {
+                                updatingAutoFallback = false
+                            }
+                        }
+                    },
                 )
             }
             ModelPresetChips(

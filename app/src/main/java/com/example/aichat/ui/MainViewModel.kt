@@ -500,6 +500,11 @@ class MainViewModel(
         configStore.update(current.copy(shortAnswerModeEnabled = enabled))
     }
 
+    /** Persists the auto fallback switch immediately, without saving the rest of the form. */
+    suspend fun setAutoFallbackEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        configStore.updateAutoFallbackEnabled(enabled)
+    }
+
     /** Persists the volume key shortcut immediately, without saving the rest of the form. */
     suspend fun setScreenshotTrigger(trigger: ScreenshotTrigger): Result<Unit> = runCatching {
         configStore.updateScreenshotTrigger(trigger)

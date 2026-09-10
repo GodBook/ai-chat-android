@@ -103,6 +103,11 @@ class ConfigStore(context: Context) {
         dataStore.edit { preferences -> preferences[SCREENSHOT_TRIGGER] = trigger.storageKey }
     }
 
+    /** Updates only the auto fallback switch so toggling it does not require saving the whole form. */
+    suspend fun updateAutoFallbackEnabled(enabled: Boolean) {
+        dataStore.edit { preferences -> preferences[AUTO_FALLBACK_ENABLED] = enabled }
+    }
+
     suspend fun reset() {
         dataStore.edit { it.clear() }
     }
