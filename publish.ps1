@@ -223,7 +223,8 @@ $manifestObj = [ordered]@{
 
 $manifestPath = "dist\latest.json"
 $manifestJson = $manifestObj | ConvertTo-Json -Depth 5
-[System.IO.File]::WriteAllText((Resolve-Path .).Path + "\$manifestPath", $manifestJson, [System.Text.Encoding]::UTF8)
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText((Resolve-Path .).Path + "\$manifestPath", $manifestJson, $utf8NoBom)
 Write-Host "[MANIFEST] Generated $manifestPath (SHA-256: $sha256)" -ForegroundColor Green
 
 # 9. Git commit & tag
@@ -260,7 +261,7 @@ try {
 }
 
 $notesFilePath = "dist\release-notes-$VersionName.md"
-[System.IO.File]::WriteAllText((Resolve-Path .).Path + "\$notesFilePath", $ReleaseNotes, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText((Resolve-Path .).Path + "\$notesFilePath", $ReleaseNotes, $utf8NoBom)
 
 if ($releaseExists) {
     Write-Host "[RELEASE] Updating existing Release: $tag" -ForegroundColor Cyan

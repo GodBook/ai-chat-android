@@ -29,6 +29,22 @@ class UpdateManifestParserTest {
     }
 
     @Test
+    fun `parses manifest with leading BOM`() {
+        val info = UpdateManifestParser.parse(
+            "\uFEFF" + """
+            {
+              "versionCode": "2",
+              "versionName": " 1.1 ",
+              "downloadUrl": "https://updates.example.test/app.apk",
+              "sha256": "$hash"
+            }
+            """.trimIndent(),
+        )
+        assertEquals(2L, info.versionCode)
+        assertEquals("1.1", info.versionName)
+    }
+
+    @Test
     fun `rejects non HTTPS download URL`() {
         val failure = assertThrows(AppUpdateException::class.java) {
             UpdateManifestParser.parse(

@@ -31,7 +31,8 @@ object UpdateManifestParser {
      * simple static hosting, while all other fields remain strictly validated.
      */
     fun parse(document: String, requireHttps: Boolean = true): AppUpdateInfo {
-        val root = runCatching { json.parseToJsonElement(document) }
+        val cleanDocument = document.removePrefix("\uFEFF").trim()
+        val root = runCatching { json.parseToJsonElement(cleanDocument) }
             .getOrElse { failure ->
                 throw AppUpdateException(
                     UpdateErrorKind.INVALID_MANIFEST,
