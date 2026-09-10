@@ -83,6 +83,7 @@ data class MainUiState(
     val draftToRestore: String? = null,
     val updateManifestUrl: String = "",
     val updateState: UpdateUiState = UpdateUiState.Idle,
+    val collapsedGroups: Set<String> = emptySet(),
 )
 
 private data class ConversationSnapshot(
@@ -101,6 +102,7 @@ private data class ConversationSelection(
 private data class SettingsSnapshot(
     val config: ProviderConfig,
     val updateManifestUrl: String,
+    val collapsedGroups: Set<String>,
 )
 
 private data class ComposerSnapshot(
@@ -162,7 +164,8 @@ class MainViewModel(
     private val settingsSnapshot: Flow<SettingsSnapshot> = combine(
         configStore.config,
         updateConfigStore.manifestUrl,
-    ) { config, updateUrl -> SettingsSnapshot(config, updateUrl) }
+        configStore.collapsedGroups,
+    ) { config, updateUrl, collapsed -> SettingsSnapshot(config, updateUrl, collapsed) }
 
     private val composerSnapshot: Flow<ComposerSnapshot> = combine(
         selectedImagePaths,
@@ -192,6 +195,7 @@ class MainViewModel(
             message = composer.message,
             draftToRestore = composer.draft,
             updateManifestUrl = settings.updateManifestUrl.ifBlank { BuildConfig.UPDATE_MANIFEST_URL },
+            collapsedGroups = settings.collapsedGroups,
         )
     }
 
@@ -241,19 +245,95 @@ class MainViewModel(
         return true
     }
 
-    fun createConversation(title: String = "新聊天", onCreated: (() -> Unit)? = null) {
+    fun createConversation(
+        title: String = "新聊天",
+        groupName: String? = null,
+        onCreated: (() -> Unit)? = null,
+    ) {
         if (uiState.value.isAnyWorking) {
             transientMessage.value = "请先停止正在生成的回复"
             return
         }
         viewModelScope.launch {
             try {
-                val conversation = repository.createConversation(title)
+                val conversation = repository.createConversation(title, groupName)
                 conversationGeneration.incrementAndGet()
                 draftToRestore.value = null
                 discardComposerImages()
                 selectedConversationId.value = conversation.id
                 onCreated?.invoke()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun setConversationGroup(id: String, groupName: String?) {
+        viewModelScope.launch {
+            try {
+                if (repository.updateConversationGroup(id, groupName) == null) {
+                    transientMessage.value = "聊天不存在"
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun setConversationsGroup(ids: Set<String>, groupName: String?) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                repository.updateConversationsGroup(ids, groupName)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun renameGroup(oldGroupName: String, newGroupName: String) {
+        val cleanOld = oldGroupName.trim()
+        val cleanNew = newGroupName.trim()
+        if (cleanOld.isBlank() || cleanNew.isBlank() || cleanOld == cleanNew) return
+        viewModelScope.launch {
+            try {
+                repository.renameGroup(cleanOld, cleanNew)
+                val current = configStore.collapsedGroups.first()
+                if (cleanOld in current) {
+                    configStore.updateCollapsedGroups(current - cleanOld + cleanNew)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun toggleGroupCollapsed(groupName: String) {
+        viewModelScope.launch {
+            try {
+                val current = configStore.collapsedGroups.first()
+                val updated = if (groupName in current) current - groupName else current + groupName
+                configStore.updateCollapsedGroups(updated)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun updateThemeColor(themeColor: String) {
+        viewModelScope.launch {
+            try {
+                configStore.updateThemeColor(themeColor)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -580,6 +660,7 @@ class MainViewModel(
         }
         return runCatching {
             if (apiKey.isNotBlank()) apiKeyStore.save(apiKey.trim())
+            val current = configStore.read()
             configStore.update(
                 baseUrl = normalizedUrl,
                 model = model.trim(),
@@ -592,10 +673,16 @@ class MainViewModel(
                 autoFallbackEnabled = autoFallbackEnabled,
                 screenshotTrigger = screenshotTrigger,
                 autoCollapseThinking = autoCollapseThinking,
+                themeColor = current.themeColor,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
         }
+    }
+
+    /** Persists the app theme color immediately. */
+    suspend fun setThemeColor(themeColor: String): Result<Unit> = runCatching {
+        configStore.updateThemeColor(themeColor)
     }
 
     /** Persists the auto collapse thinking switch immediately. */

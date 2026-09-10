@@ -9,6 +9,9 @@ const val MAX_SCREENSHOT_PROMPT_LENGTH = 2_000
 const val DEFAULT_OVERLAY_BACKGROUND_COLOR = "#CCF1FB"
 const val DEFAULT_OVERLAY_GLASS_ENABLED = false
 
+/** Default app theme color. */
+const val DEFAULT_THEME_COLOR = "classic_blue"
+
 /** Default provider endpoint. DeepSeek is the out-of-the-box provider. */
 const val DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 
@@ -175,6 +178,8 @@ data class ProviderConfig(
     val screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
     /** Auto collapses the thinking process bubble when thinking finishes. */
     val autoCollapseThinking: Boolean = true,
+    /** Theme color for the app interface. */
+    val themeColor: String = DEFAULT_THEME_COLOR,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

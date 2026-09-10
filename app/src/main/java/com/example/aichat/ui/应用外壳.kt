@@ -102,11 +102,17 @@ fun AiChatApp(viewModel: MainViewModel) {
                     previews = state.conversationPreviews,
                     selectedConversationId = state.selectedConversationId,
                     isAnyWorking = state.isAnyWorking,
+                    collapsedGroups = state.collapsedGroups,
                     onOpenChat = { id ->
                         if (viewModel.selectConversation(id)) navController.navigate(Routes.CHAT)
                     },
-                    onCreateConversation = { title, onCreated ->
-                        viewModel.createConversation(title) {
+                    onFastCreateConversation = {
+                        viewModel.createConversation("新聊天") {
+                            navController.navigate(Routes.CHAT)
+                        }
+                    },
+                    onCreateConversation = { title, group, onCreated ->
+                        viewModel.createConversation(title, group) {
                             onCreated()
                             navController.navigate(Routes.CHAT)
                         }
@@ -124,6 +130,10 @@ fun AiChatApp(viewModel: MainViewModel) {
                             shareConversation(context, title, content)
                         }
                     },
+                    onSetConversationGroup = viewModel::setConversationGroup,
+                    onSetConversationsGroup = viewModel::setConversationsGroup,
+                    onRenameGroup = viewModel::renameGroup,
+                    onToggleGroupCollapsed = viewModel::toggleGroupCollapsed,
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 )
             }
@@ -214,6 +224,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onAutoCollapseThinkingChanged = viewModel::setAutoCollapseThinking,
                     onModelPresetSelected = viewModel::selectModelPreset,
                     onScreenshotTriggerChanged = viewModel::setScreenshotTrigger,
+                    onThemeColorChanged = viewModel::setThemeColor,
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,
                     onDownloadUpdate = viewModel::downloadUpdate,

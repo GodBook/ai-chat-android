@@ -33,6 +33,15 @@ interface ChatConversationDao {
     @Query("UPDATE chat_conversations SET updatedAt = :updatedAt WHERE id = :id")
     suspend fun touch(id: String, updatedAt: Long): Int
 
+    @Query("UPDATE chat_conversations SET groupName = :groupName, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateGroup(id: String, groupName: String?, updatedAt: Long): Int
+
+    @Query("UPDATE chat_conversations SET groupName = :groupName, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateGroups(ids: List<String>, groupName: String?, updatedAt: Long): Int
+
+    @Query("UPDATE chat_conversations SET groupName = :newGroupName, updatedAt = :updatedAt WHERE groupName = :oldGroupName")
+    suspend fun renameGroup(oldGroupName: String, newGroupName: String, updatedAt: Long): Int
+
     @Query("DELETE FROM chat_conversations WHERE id = :id")
     suspend fun deleteById(id: String): Int
 

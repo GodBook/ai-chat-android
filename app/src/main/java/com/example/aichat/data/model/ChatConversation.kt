@@ -8,10 +8,13 @@ package com.example.aichat.data.model
 const val DEFAULT_CONVERSATION_ID: String = "default"
 
 const val DEFAULT_CONVERSATION_TITLE: String = "默认聊天"
+const val DEFAULT_GROUP_NAME: String = "未分组"
 
 data class ChatConversation(
     val id: String,
     val title: String,
     val createdAt: Long,
     val updatedAt: Long,
+    val groupName: String? = null,
 )
+

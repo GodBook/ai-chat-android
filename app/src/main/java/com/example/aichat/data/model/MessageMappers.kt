@@ -41,6 +41,7 @@ internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversat
     title = title,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    groupName = groupName,
 )
 
 internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversationEntity(
@@ -48,6 +49,7 @@ internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversat
     title = title,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    groupName = groupName,
 )
 
 internal fun String.toMessageRole(): MessageRole = runCatching {

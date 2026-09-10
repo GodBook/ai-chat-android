@@ -132,6 +132,59 @@ class ChatDatabaseMigrationTest {
         )
     }
 
+    @Test
+    fun migrationFromVersion4AddsGroupNameColumn() = runBlocking {
+        context.openOrCreateDatabase(DATABASE_NAME, Context.MODE_PRIVATE, null).use { db ->
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `chat_conversations` (
+                    `id` TEXT NOT NULL,
+                    `title` TEXT NOT NULL,
+                    `createdAt` INTEGER NOT NULL,
+                    `updatedAt` INTEGER NOT NULL,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `chat_messages` (
+                    `id` TEXT NOT NULL,
+                    `conversationId` TEXT NOT NULL,
+                    `role` TEXT NOT NULL,
+                    `text` TEXT NOT NULL,
+                    `imagePaths` TEXT NOT NULL,
+                    `status` TEXT NOT NULL,
+                    `requestId` TEXT,
+                    `createdAt` INTEGER NOT NULL,
+                    `errorMessage` TEXT,
+                    `thinkingContent` TEXT,
+                    `thinkingDurationMs` INTEGER,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                "INSERT INTO `chat_conversations` (`id`, `title`, `createdAt`, `updatedAt`) VALUES ('chat-1', '测试聊天', 100, 200)",
+            )
+            db.version = 4
+        }
+
+        val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
+            .addMigrations(ChatDatabase.MIGRATION_4_5)
+            .build()
+        roomDatabase = migrated
+
+        val conversation = migrated.chatConversationDao().getById("chat-1")
+        assertNotNull(conversation)
+        assertEquals("chat-1", conversation?.id)
+        assertEquals("测试聊天", conversation?.title)
+        assertNull(conversation?.groupName)
+
+        migrated.chatConversationDao().updateGroup("chat-1", "工作", 300)
+        assertEquals("工作", migrated.chatConversationDao().getById("chat-1")?.groupName)
+    }
+
     private companion object {
         const val DATABASE_NAME = "migration-test.db"
     }

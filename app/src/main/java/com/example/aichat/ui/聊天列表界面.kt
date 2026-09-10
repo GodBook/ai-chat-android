@@ -8,8 +8,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,20 +26,34 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOff
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,6 +61,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -48,21 +69,30 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -70,7 +100,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
+import com.example.aichat.data.model.DEFAULT_GROUP_NAME
 import com.example.aichat.data.model.MessageStatus
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -79,25 +112,38 @@ internal fun ContactsScreen(
     previews: Map<String, ChatMessage>,
     selectedConversationId: String?,
     isAnyWorking: Boolean,
+    collapsedGroups: Set<String> = emptySet(),
     onOpenChat: (String) -> Unit,
-    onCreateConversation: (String, () -> Unit) -> Unit,
+    onCreateConversation: (String, String?, () -> Unit) -> Unit,
+    onFastCreateConversation: () -> Unit,
     onRenameConversation: (String, String) -> Unit,
     onDeleteConversation: (String) -> Unit,
     onDeleteConversations: (Set<String>) -> Unit,
     onExportConversation: (String) -> Unit,
     onExportConversations: (Set<String>) -> Unit,
+    onSetConversationGroup: (String, String?) -> Unit = { _, _ -> },
+    onSetConversationsGroup: (Set<String>, String?) -> Unit = { _, _ -> },
+    onRenameGroup: (String, String) -> Unit = { _, _ -> },
+    onToggleGroupCollapsed: (String) -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var renameTarget by remember { mutableStateOf<ChatConversation?>(null) }
+    var setGroupTarget by remember { mutableStateOf<ChatConversation?>(null) }
+    var renameGroupTarget by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<ChatConversation?>(null) }
     var titleDraft by rememberSaveable { mutableStateOf("新聊天") }
+    var groupDraft by rememberSaveable { mutableStateOf("") }
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
     var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var showBatchGroupDialog by rememberSaveable { mutableStateOf(false) }
     val visibleConversations = filterConversations(conversations, previews, searchQuery)
+    val existingGroups = remember(conversations) {
+        conversations.mapNotNull { it.groupName?.trim()?.takeIf { g -> g.isNotEmpty() } }.distinct()
+    }
 
     BackHandler(enabled = isSelectionMode) {
         isSelectionMode = false
@@ -168,15 +214,15 @@ internal fun ContactsScreen(
                                     Icon(Icons.Default.Checklist, contentDescription = "批量管理")
                                 }
                             }
-                            IconButton(
-                                onClick = {
+                            NewChatActionButton(
+                                enabled = !isAnyWorking,
+                                onFastCreate = onFastCreateConversation,
+                                onLongPressCreate = {
                                     titleDraft = "新聊天"
+                                    groupDraft = ""
                                     showCreateDialog = true
                                 },
-                                enabled = !isAnyWorking,
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = "新建聊天")
-                            }
+                            )
                             IconButton(onClick = onOpenSettings) {
                                 Icon(Icons.Default.Settings, contentDescription = "设置")
                             }
@@ -224,6 +270,14 @@ internal fun ContactsScreen(
                             Spacer(Modifier.width(6.dp))
                             Text("批量导出 (${selectedIds.size})")
                         }
+                        TextButton(
+                            onClick = { showBatchGroupDialog = true },
+                            enabled = selectedIds.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("批量分组 (${selectedIds.size})")
+                        }
                     },
                     floatingActionButton = {
                         Button(
@@ -259,37 +313,77 @@ internal fun ContactsScreen(
                 Text("没有匹配的聊天", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
+            val groupedConversations = remember(visibleConversations) {
+                val namedGroups = visibleConversations
+                    .mapNotNull { it.groupName?.trim()?.takeIf { g -> g.isNotEmpty() } }
+                    .distinct()
+                val result = mutableListOf<Pair<String, List<ChatConversation>>>()
+                namedGroups.forEach { name ->
+                    result.add(name to visibleConversations.filter { it.groupName?.trim() == name })
+                }
+                val ungrouped = visibleConversations.filter { it.groupName.isNullOrBlank() }
+                if (ungrouped.isNotEmpty()) {
+                    result.add(DEFAULT_GROUP_NAME to ungrouped)
+                }
+                result
+            }
+
             LazyColumn(
                 modifier = Modifier.padding(padding).fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(visibleConversations, key = { it.id }) { conversation ->
-                    ConversationRow(
-                        conversation = conversation,
-                        preview = previews[conversation.id],
-                        selected = conversation.id == selectedConversationId,
-                        isSelectionMode = isSelectionMode,
-                        isChecked = conversation.id in selectedIds,
-                        onToggleCheck = {
-                            selectedIds = if (conversation.id in selectedIds) {
-                                selectedIds - conversation.id
-                            } else {
-                                selectedIds + conversation.id
-                            }
-                        },
-                        onClick = { onOpenChat(conversation.id) },
-                        onLongClick = {
-                            isSelectionMode = true
-                            selectedIds = setOf(conversation.id)
-                        },
-                        onRename = {
-                            titleDraft = conversation.title
-                            renameTarget = conversation
-                        },
-                        onDelete = { deleteTarget = conversation },
-                        onExport = { onExportConversation(conversation.id) },
-                    )
+                groupedConversations.forEach { (groupName, convList) ->
+                    val isCollapsed = groupName in collapsedGroups && searchQuery.isBlank()
+                    val isDefaultGroup = groupName == DEFAULT_GROUP_NAME
+
+                    item(key = "header_$groupName") {
+                        ConversationGroupHeader(
+                            groupName = groupName,
+                            count = convList.size,
+                            isCollapsed = isCollapsed,
+                            onToggleCollapse = { onToggleGroupCollapsed(groupName) },
+                            onRenameGroup = if (!isDefaultGroup) {
+                                { renameGroupTarget = groupName }
+                            } else null,
+                            onDissolveGroup = if (!isDefaultGroup) {
+                                { onSetConversationsGroup(convList.map { it.id }.toSet(), null) }
+                            } else null,
+                        )
+                    }
+
+                    if (!isCollapsed) {
+                        items(convList, key = { it.id }) { conversation ->
+                            ConversationRow(
+                                conversation = conversation,
+                                preview = previews[conversation.id],
+                                selected = conversation.id == selectedConversationId,
+                                isSelectionMode = isSelectionMode,
+                                isChecked = conversation.id in selectedIds,
+                                onToggleCheck = {
+                                    selectedIds = if (conversation.id in selectedIds) {
+                                        selectedIds - conversation.id
+                                    } else {
+                                        selectedIds + conversation.id
+                                    }
+                                },
+                                onClick = { onOpenChat(conversation.id) },
+                                onLongClick = {
+                                    isSelectionMode = true
+                                    selectedIds = setOf(conversation.id)
+                                },
+                                onRename = {
+                                    titleDraft = conversation.title
+                                    renameTarget = conversation
+                                },
+                                onSetGroup = {
+                                    setGroupTarget = conversation
+                                },
+                                onDelete = { deleteTarget = conversation },
+                                onExport = { onExportConversation(conversation.id) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -300,10 +394,15 @@ internal fun ContactsScreen(
             title = "新建聊天",
             value = titleDraft,
             confirmLabel = "创建",
+            groupName = groupDraft,
+            existingGroups = existingGroups,
+            allowGroup = true,
             onValueChange = { titleDraft = it },
+            onGroupChange = { groupDraft = it },
             onDismiss = { showCreateDialog = false },
             onConfirm = {
-                onCreateConversation(titleDraft.trim()) { showCreateDialog = false }
+                val cleanGroup = groupDraft.trim().takeIf { it.isNotEmpty() }
+                onCreateConversation(titleDraft.trim(), cleanGroup) { showCreateDialog = false }
             },
         )
     }
@@ -317,6 +416,41 @@ internal fun ContactsScreen(
             onConfirm = {
                 onRenameConversation(target.id, titleDraft.trim())
                 renameTarget = null
+            },
+        )
+    }
+    setGroupTarget?.let { target ->
+        SetGroupDialog(
+            currentGroup = target.groupName,
+            existingGroups = existingGroups,
+            onDismiss = { setGroupTarget = null },
+            onConfirm = { newGroup ->
+                onSetConversationGroup(target.id, newGroup)
+                setGroupTarget = null
+            },
+        )
+    }
+    if (showBatchGroupDialog) {
+        SetGroupDialog(
+            currentGroup = null,
+            existingGroups = existingGroups,
+            onDismiss = { showBatchGroupDialog = false },
+            onConfirm = { newGroup ->
+                val targets = selectedIds
+                showBatchGroupDialog = false
+                isSelectionMode = false
+                selectedIds = emptySet()
+                onSetConversationsGroup(targets, newGroup)
+            },
+        )
+    }
+    renameGroupTarget?.let { oldGroup ->
+        RenameGroupDialog(
+            oldName = oldGroup,
+            onDismiss = { renameGroupTarget = null },
+            onConfirm = { newName ->
+                onRenameGroup(oldGroup, newName)
+                renameGroupTarget = null
             },
         )
     }
@@ -369,6 +503,7 @@ private fun ConversationRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onRename: () -> Unit,
+    onSetGroup: () -> Unit,
     onDelete: () -> Unit,
     onExport: () -> Unit,
 ) {
@@ -433,7 +568,32 @@ private fun ConversationRow(
                 }
             },
             headlineContent = {
-                Text(conversation.title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = conversation.title,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (!conversation.groupName.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        ) {
+                            Text(
+                                text = conversation.groupName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
             },
             supportingContent = {
                 Text(
@@ -482,6 +642,14 @@ private fun ConversationRow(
                                 },
                             )
                             DropdownMenuItem(
+                                text = { Text("设置分组") },
+                                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onSetGroup()
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("删除") },
                                 leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null) },
                                 onClick = {
@@ -506,11 +674,261 @@ private fun ConversationRow(
 }
 
 @Composable
+private fun NewChatActionButton(
+    enabled: Boolean,
+    onFastCreate: () -> Unit,
+    onLongPressCreate: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .indication(interactionSource, ripple(bounded = false, radius = 24.dp))
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val press = PressInteraction.Press(down.position)
+                    scope.launch { interactionSource.emit(press) }
+                    val up = try {
+                        withTimeout(1000L) {
+                            waitForUpOrCancellation()
+                        }
+                    } catch (e: PointerEventTimeoutCancellationException) {
+                        scope.launch { interactionSource.emit(PressInteraction.Release(press)) }
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongPressCreate()
+                        waitForUpOrCancellation()
+                        null
+                    }
+                    if (up != null) {
+                        scope.launch { interactionSource.emit(PressInteraction.Release(press)) }
+                        onFastCreate()
+                    } else {
+                        scope.launch { interactionSource.emit(PressInteraction.Cancel(press)) }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = "新建聊天",
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        )
+    }
+}
+
+@Composable
+private fun ConversationGroupHeader(
+    groupName: String,
+    count: Int,
+    isCollapsed: Boolean,
+    onToggleCollapse: () -> Unit,
+    onRenameGroup: (() -> Unit)?,
+    onDissolveGroup: (() -> Unit)?,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggleCollapse)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (isCollapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (isCollapsed) "展开分组" else "折叠分组",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = groupName,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            )
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        if (onRenameGroup != null || onDissolveGroup != null) {
+            Box {
+                IconButton(
+                    onClick = { menuExpanded = true },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "分组操作",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                ) {
+                    if (onRenameGroup != null) {
+                        DropdownMenuItem(
+                            text = { Text("重命名分组") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onRenameGroup()
+                            },
+                        )
+                    }
+                    if (onDissolveGroup != null) {
+                        DropdownMenuItem(
+                            text = { Text("解散分组") },
+                            leadingIcon = { Icon(Icons.Default.FolderOff, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onDissolveGroup()
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetGroupDialog(
+    currentGroup: String?,
+    existingGroups: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String?) -> Unit,
+) {
+    var inputGroup by remember { mutableStateOf(currentGroup ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置分组") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = inputGroup,
+                    onValueChange = { inputGroup = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("分组名称") },
+                    placeholder = { Text("输入新分组或选择已有分组") },
+                )
+
+                if (existingGroups.isNotEmpty()) {
+                    Text(
+                        "已有分组：",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        existingGroups.forEach { group ->
+                            FilterChip(
+                                selected = inputGroup == group,
+                                onClick = { inputGroup = group },
+                                label = { Text(group) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val clean = inputGroup.trim().takeIf { it.isNotEmpty() }
+                    onConfirm(clean)
+                },
+            ) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (!currentGroup.isNullOrBlank()) {
+                    TextButton(
+                        onClick = { onConfirm(null) },
+                    ) {
+                        Text("移出分组", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun RenameGroupDialog(
+    oldName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var newName by remember { mutableStateOf(oldName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名分组") },
+        text = {
+            OutlinedTextField(
+                value = newName,
+                onValueChange = { newName = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("新分组名称") },
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(newName.trim()) },
+                enabled = newName.trim().isNotEmpty() && newName.trim() != oldName,
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
 private fun ChatTitleDialog(
     title: String,
     value: String,
     confirmLabel: String,
+    groupName: String = "",
+    existingGroups: List<String> = emptyList(),
+    allowGroup: Boolean = false,
     onValueChange: (String) -> Unit,
+    onGroupChange: (String) -> Unit = {},
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -518,13 +936,41 @@ private fun ChatTitleDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("聊天名称") },
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("聊天名称") },
+                )
+                if (allowGroup) {
+                    OutlinedTextField(
+                        value = groupName,
+                        onValueChange = onGroupChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("分组（可选）") },
+                        placeholder = { Text("输入或选择分组") },
+                    )
+                    if (existingGroups.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            existingGroups.forEach { group ->
+                                FilterChip(
+                                    selected = groupName == group,
+                                    onClick = { onGroupChange(group) },
+                                    label = { Text(group) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             TextButton(onClick = onConfirm, enabled = value.trim().isNotEmpty()) { Text(confirmLabel) }

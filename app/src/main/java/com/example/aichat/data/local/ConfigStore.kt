@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.aichat.data.model.DEFAULT_BASE_URL
 import com.example.aichat.data.model.DEFAULT_MODEL
@@ -13,6 +14,7 @@ import com.example.aichat.data.model.DEFAULT_OVERLAY_BACKGROUND_COLOR
 import com.example.aichat.data.model.DEFAULT_OVERLAY_GLASS_ENABLED
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_PROMPT
 import com.example.aichat.data.model.DEFAULT_SCREENSHOT_TRIGGER
+import com.example.aichat.data.model.DEFAULT_THEME_COLOR
 import com.example.aichat.data.model.ScreenshotTrigger
 import com.example.aichat.data.model.normalizeOverlayBackgroundColor
 import com.example.aichat.data.model.normalizeScreenshotTrigger
@@ -45,7 +47,12 @@ class ConfigStore(context: Context) {
             autoFallbackEnabled = preferences[AUTO_FALLBACK_ENABLED] ?: true,
             screenshotTrigger = normalizeScreenshotTrigger(preferences[SCREENSHOT_TRIGGER]),
             autoCollapseThinking = preferences[AUTO_COLLAPSE_THINKING] ?: true,
+            themeColor = preferences[THEME_COLOR] ?: DEFAULT_THEME_COLOR,
         )
+    }
+
+    val collapsedGroups: Flow<Set<String>> = dataStore.data.map { preferences ->
+        preferences[COLLAPSED_GROUPS] ?: emptySet()
     }
 
     suspend fun read(): ProviderConfig = config.first()
@@ -62,6 +69,7 @@ class ConfigStore(context: Context) {
         autoFallbackEnabled: Boolean = true,
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
         autoCollapseThinking: Boolean = true,
+        themeColor: String = DEFAULT_THEME_COLOR,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -75,6 +83,7 @@ class ConfigStore(context: Context) {
             preferences[AUTO_FALLBACK_ENABLED] = autoFallbackEnabled
             preferences[SCREENSHOT_TRIGGER] = screenshotTrigger.storageKey
             preferences[AUTO_COLLAPSE_THINKING] = autoCollapseThinking
+            preferences[THEME_COLOR] = themeColor
         }
     }
 
@@ -90,7 +99,18 @@ class ConfigStore(context: Context) {
         autoFallbackEnabled = config.autoFallbackEnabled,
         screenshotTrigger = config.screenshotTrigger,
         autoCollapseThinking = config.autoCollapseThinking,
+        themeColor = config.themeColor,
     )
+
+    /** Updates app theme color immediately. */
+    suspend fun updateThemeColor(themeColor: String) {
+        dataStore.edit { preferences -> preferences[THEME_COLOR] = themeColor }
+    }
+
+    /** Updates collapsed groups set immediately. */
+    suspend fun updateCollapsedGroups(groups: Set<String>) {
+        dataStore.edit { preferences -> preferences[COLLAPSED_GROUPS] = groups }
+    }
 
     /** Updates only overlay appearance so an immediate color choice cannot overwrite other settings. */
     suspend fun updateOverlayAppearance(
@@ -145,5 +165,7 @@ class ConfigStore(context: Context) {
         val AUTO_FALLBACK_ENABLED = booleanPreferencesKey("auto_fallback_enabled")
         val SCREENSHOT_TRIGGER = stringPreferencesKey("screenshot_trigger")
         val AUTO_COLLAPSE_THINKING = booleanPreferencesKey("auto_collapse_thinking")
+        val THEME_COLOR = stringPreferencesKey("theme_color")
+        val COLLAPSED_GROUPS = stringSetPreferencesKey("collapsed_groups")
     }
 }

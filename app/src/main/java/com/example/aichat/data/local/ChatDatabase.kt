@@ -11,7 +11,7 @@ import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 
 @Database(
     entities = [ChatMessageEntity::class, ChatConversationEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -93,6 +93,13 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** Adds groupName to chat_conversations. */
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `groupName` TEXT")
+            }
+        }
+
         private val CREATE_DEFAULT_CONVERSATION = object : RoomDatabase.Callback() {
             override fun onCreate(database: SupportSQLiteDatabase) {
                 super.onCreate(database)
@@ -115,7 +122,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "ai_chat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()
                     .also { instance = it }

@@ -284,16 +284,59 @@ class DefaultChatRepository(
             conversationDao.getById(normalizeConversationId(conversationId))?.toDomain()
         }
 
-    override suspend fun createConversation(title: String): ChatConversation {
+    override suspend fun createConversation(
+        title: String,
+        groupName: String?,
+    ): ChatConversation {
         val now = System.currentTimeMillis()
         val conversation = ChatConversation(
             id = UUID.randomUUID().toString(),
             title = normalizeTitle(title),
             createdAt = now,
             updatedAt = now,
+            groupName = groupName?.trim()?.takeIf { it.isNotEmpty() },
         )
         withContext(Dispatchers.IO) { conversationDao.insert(conversation.toEntity()) }
         return conversation
+    }
+
+    override suspend fun updateConversationGroup(
+        conversationId: String,
+        groupName: String?,
+    ): ChatConversation? {
+        val id = normalizeConversationId(conversationId)
+        val cleanGroup = groupName?.trim()?.takeIf { it.isNotEmpty() }
+        return withContext(Dispatchers.IO) {
+            if (conversationDao.updateGroup(id, cleanGroup, System.currentTimeMillis()) == 0) {
+                null
+            } else {
+                conversationDao.getById(id)?.toDomain()
+            }
+        }
+    }
+
+    override suspend fun updateConversationsGroup(
+        conversationIds: Collection<String>,
+        groupName: String?,
+    ): Int {
+        val targetIds = conversationIds.map { normalizeConversationId(it) }.distinct()
+        if (targetIds.isEmpty()) return 0
+        val cleanGroup = groupName?.trim()?.takeIf { it.isNotEmpty() }
+        return withContext(Dispatchers.IO) {
+            conversationDao.updateGroups(targetIds, cleanGroup, System.currentTimeMillis())
+        }
+    }
+
+    override suspend fun renameGroup(
+        oldGroupName: String,
+        newGroupName: String,
+    ): Int {
+        val cleanOld = oldGroupName.trim()
+        val cleanNew = newGroupName.trim()
+        if (cleanOld.isEmpty() || cleanNew.isEmpty() || cleanOld == cleanNew) return 0
+        return withContext(Dispatchers.IO) {
+            conversationDao.renameGroup(cleanOld, cleanNew, System.currentTimeMillis())
+        }
     }
 
     override suspend fun renameConversation(

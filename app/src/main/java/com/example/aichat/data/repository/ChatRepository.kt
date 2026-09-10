@@ -38,10 +38,19 @@ interface ChatRepository {
 
     suspend fun getConversation(conversationId: String): ChatConversation? = null
 
-    suspend fun createConversation(title: String = DEFAULT_CONVERSATION_TITLE): ChatConversation =
+    suspend fun createConversation(
+        title: String = DEFAULT_CONVERSATION_TITLE,
+        groupName: String? = null,
+    ): ChatConversation =
         throw UnsupportedOperationException("多会话功能未由此仓储实现")
 
     suspend fun renameConversation(conversationId: String, title: String): ChatConversation? = null
+
+    suspend fun updateConversationGroup(conversationId: String, groupName: String?): ChatConversation? = null
+
+    suspend fun updateConversationsGroup(conversationIds: Collection<String>, groupName: String?): Int = 0
+
+    suspend fun renameGroup(oldGroupName: String, newGroupName: String): Int = 0
 
     suspend fun deleteConversation(conversationId: String): Boolean = false
  

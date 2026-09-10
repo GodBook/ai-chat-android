@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
@@ -182,6 +183,66 @@ private fun ModelPresetChips(
                     selected = currentModel.trim() == preset.model,
                     onClick = { onPicked(preset) },
                     label = { Text(preset.label) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeColorSettings(
+    selectedThemeKey: String,
+    onThemeSelected: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AppThemeColor.entries.forEach { preset ->
+            val selected = selectedThemeKey == preset.key
+            Column(
+                modifier = Modifier
+                    .width(58.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .selectable(
+                        selected = selected,
+                        role = Role.RadioButton,
+                        onClick = { onThemeSelected(preset.key) },
+                    )
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(preset.lightPrimary)
+                        .border(
+                            width = if (selected) 3.dp else 1.dp,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            },
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                Text(
+                    preset.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                 )
             }
         }
@@ -369,6 +430,7 @@ internal fun SettingsScreen(
     onAutoCollapseThinkingChanged: suspend (Boolean) -> Result<Unit>,
     onModelPresetSelected: suspend (ModelPreset) -> Result<Unit>,
     onScreenshotTriggerChanged: suspend (ScreenshotTrigger) -> Result<Unit>,
+    onThemeColorChanged: suspend (String) -> Result<Unit> = { Result.success(Unit) },
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
@@ -382,6 +444,7 @@ internal fun SettingsScreen(
     var baseUrl by rememberSaveable(state.config.baseUrl) { mutableStateOf(state.config.baseUrl) }
     var model by rememberSaveable(state.config.model) { mutableStateOf(state.config.model) }
     var apiKey by rememberSaveable { mutableStateOf("") }
+    var themeColor by rememberSaveable(state.config.themeColor) { mutableStateOf(state.config.themeColor) }
     var visionEnabled by rememberSaveable(state.config.visionEnabled) { mutableStateOf(state.config.visionEnabled) }
     var backgroundCaptureEnabled by rememberSaveable(state.config.backgroundCaptureEnabled) {
         mutableStateOf(state.config.backgroundCaptureEnabled)
@@ -736,7 +799,25 @@ internal fun SettingsScreen(
                 }
             }
 
-            // 2. 对话偏好卡片
+            // 2. 主题颜色卡片
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.Palette,
+                    title = "主题颜色",
+                    subtitle = "选择你喜爱的应用主题色调",
+                )
+                ThemeColorSettings(
+                    selectedThemeKey = themeColor,
+                    onThemeSelected = { requestedKey ->
+                        themeColor = requestedKey
+                        scope.launch {
+                            onThemeColorChanged(requestedKey)
+                        }
+                    },
+                )
+            }
+
+            // 3. 对话偏好卡片
             SettingsCard {
                 SettingsCardHeader(
                     icon = Icons.Default.AutoAwesome,

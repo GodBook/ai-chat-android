@@ -15,4 +15,5 @@ data class ChatConversationEntity(
     val title: String,
     val createdAt: Long,
     val updatedAt: Long,
+    val groupName: String? = null,
 )

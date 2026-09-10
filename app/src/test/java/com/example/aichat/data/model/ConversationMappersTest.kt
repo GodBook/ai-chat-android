@@ -51,4 +51,19 @@ class ConversationMappersTest {
 
         assertEquals(row, row.toDomain().toEntity())
     }
+
+    @Test
+    fun `conversation group name is preserved`() {
+        val conversation = ChatConversation(
+            id = "conversation-3",
+            title = "项目方案",
+            createdAt = 100L,
+            updatedAt = 200L,
+            groupName = "工作",
+        )
+
+        val entity = conversation.toEntity()
+        assertEquals("工作", entity.groupName)
+        assertEquals(conversation, entity.toDomain())
+    }
 }
