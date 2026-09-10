@@ -1,9 +1,6 @@
 name: 发布 Android 更新
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       release_notes:

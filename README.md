@@ -96,12 +96,14 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ### 发布更新
 
-仓库已配置 `.github/workflows/发布.yml`。推送与 `versionName` 一致的标签（例如 `v1.4.6`）后，GitHub Actions 会自动运行测试和 Lint，签名 APK，计算 SHA-256，生成 `latest.json`，并创建公开 Release：
+从 `1.6.0` 起，推荐使用本地一键发布脚本（耗时仅约 30 秒，告别云端 6 分钟慢速构建）：
 
 ```powershell
-git tag v1.4.6
-git push origin v1.4.6
+# 在根目录配置 local.signing.properties 与签名证书后直接执行：
+.\publish.ps1 -VersionName "1.6.0" -ReleaseNotes "版本更新说明..."
 ```
+
+脚本将全自动在本地完成 Release 编译、正式证书签名校验、SHA-256 计算、生成 `latest.json` 并通过 GitHub CLI 直传创建 Release。云端 GitHub Actions 工作流作为后备手动触发保留。
 
 发布前先在仓库 Settings → Secrets and variables → Actions 中配置以下四个 Secret。签名文件只会在 Actions runner 的临时目录使用，不会进入 Git 历史：
 

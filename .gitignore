@@ -9,5 +9,10 @@ captures/
 .externalNativeBuild/
 .cxx/
 signing.keystore
+*.keystore
+*.jks
+local.signing.properties
+dist/
+scratch/
 交付/*.apk
 .workbuddy/
