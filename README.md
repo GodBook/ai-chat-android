@@ -114,7 +114,7 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ```powershell
 # 在根目录配置 local.signing.properties 与签名证书后直接执行：
-.\publish.ps1 -VersionName "1.6.0" -ReleaseNotes "版本更新说明..."
+.\publish.ps1 -VersionName "1.6.7" -ReleaseNotes "版本更新说明..."
 ```
 
 脚本将全自动在本地完成 Release 编译、正式证书签名校验、SHA-256 计算、生成 `latest.json` 并通过 GitHub CLI 直传创建 Release。云端 GitHub Actions 工作流作为后备手动触发保留。
@@ -134,11 +134,11 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 ```json
 {
-  "versionCode": 13,
-  "versionName": "1.4.6",
-  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.4.6/ai-botoy-1.4.6.apk",
-  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "releaseNotes": "优化流式回复性能、后台权限体验和在线更新发布链路"
+  "versionCode": 30,
+  "versionName": "1.6.7",
+  "downloadUrl": "https://github.com/GodBook/ai-chat-android/releases/download/v1.6.7/ai-botoy-1.6.7.apk",
+  "sha256": "e115b01b55a25084badfbfd2af1e81be6bdafa92697b2c613b2bd8753ab332fb",
+  "releaseNotes": "全新电光蓝极光液态玻璃气泡图标，修复输入框排版挤压，支持引用回复与 LaTeX 数学公式渲染"
 }
 ```
 
