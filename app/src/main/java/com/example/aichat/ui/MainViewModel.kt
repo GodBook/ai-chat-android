@@ -211,7 +211,8 @@ class MainViewModel(
         conversationSnapshot,
         settingsSnapshot,
         composerSnapshot,
-    ) { conversationsState, settings, composer ->
+        repository.searchingConversation,
+    ) { conversationsState, settings, composer, searchingId ->
         val previews = conversationsState.previews.associateBy { it.conversationId }
         val isWebSearch = composer.webSearchActive ?: settings.config.defaultWebSearchEnabled
         MainUiState(
@@ -225,7 +226,7 @@ class MainViewModel(
             messages = conversationsState.selectedMessages,
             config = settings.config,
             selectedImagePaths = composer.images,
-            isWorking = conversationsState.selectedMessages.any { it.isGenerating() },
+            isWorking = conversationsState.selectedMessages.any { it.isGenerating() } || (searchingId != null && searchingId == conversationsState.selectedId),
             isAnyWorking = conversationsState.isAnyWorking,
             message = composer.message,
             draftToRestore = composer.draft,
@@ -383,6 +384,18 @@ class MainViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun setConversationIcon(id: String, icon: String?) {
+        viewModelScope.launch {
+            try {
+                if (!repository.setConversationIcon(id, icon)) transientMessage.value = "聊天不存在"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
                 transientMessage.value = failure.userFacingMessage()
             }
         }

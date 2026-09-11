@@ -31,6 +31,7 @@ class BackupRestoreManagerTest {
             groupName = "工作",
             createdAt = 1000L,
             updatedAt = 2000L,
+            icon = "data:image/jpeg;base64,dGVzdA==",
         )
 
         val msg1 = ChatMessage(
@@ -93,6 +94,7 @@ class BackupRestoreManagerTest {
         assertNotEquals("c1", importedConv.id)
         assertEquals("技术交流", importedConv.title)
         assertEquals("工作", importedConv.groupName)
+        assertEquals(conv1.icon, importedConv.icon)
 
         // Verifying message conversationId remapped
         assertEquals(2, insertedMsgs.size)

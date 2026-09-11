@@ -194,7 +194,7 @@ internal fun WebSearchResultsCard(
                         modifier = Modifier.size(16.dp),
                     )
                     Text(
-                        text = "已参考 ${results.size} 条网络检索结果",
+                        text = if (results.isEmpty()) "未找到可核验的网络资料" else "已获取 ${results.size} 条网络参考资料",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

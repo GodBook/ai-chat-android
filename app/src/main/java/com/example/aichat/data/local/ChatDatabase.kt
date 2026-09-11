@@ -11,7 +11,7 @@ import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 
 @Database(
     entities = [ChatMessageEntity::class, ChatConversationEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -115,14 +115,20 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `icon` TEXT")
+            }
+        }
+
         private val CREATE_DEFAULT_CONVERSATION = object : RoomDatabase.Callback() {
             override fun onCreate(database: SupportSQLiteDatabase) {
                 super.onCreate(database)
                 val now = System.currentTimeMillis()
                 database.execSQL(
                     "INSERT OR IGNORE INTO `chat_conversations` " +
-                        "(`id`, `title`, `createdAt`, `updatedAt`) VALUES (?, ?, ?, ?)",
-                    arrayOf<Any>(DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE, now, now),
+                        "(`id`, `title`, `createdAt`, `updatedAt`, `isPinned`) VALUES (?, ?, ?, ?, ?)",
+                    arrayOf<Any>(DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE, now, now, 0),
                 )
             }
         }
@@ -137,7 +143,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "ai_chat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()
                     .also { instance = it }

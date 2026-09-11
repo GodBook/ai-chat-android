@@ -1065,7 +1065,7 @@ private fun MessageBubble(
                             )
                         }
 
-                        if (!message.webSearchResults.isNullOrEmpty()) {
+                        if (message.webSearchResults != null) {
                             WebSearchResultsCard(
                                 results = message.webSearchResults,
                                 modifier = Modifier.padding(bottom = 8.dp),

@@ -45,6 +45,7 @@ internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversat
     updatedAt = updatedAt,
     groupName = groupName,
     isPinned = isPinned,
+    icon = icon,
 )
 
 internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversationEntity(
@@ -54,6 +55,7 @@ internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversat
     updatedAt = updatedAt,
     groupName = groupName,
     isPinned = isPinned,
+    icon = icon,
 )
 
 internal fun String.toMessageRole(): MessageRole = runCatching {
@@ -72,7 +74,7 @@ internal fun decodeImagePaths(value: String): List<String> = runCatching {
 }.getOrDefault(emptyList())
 
 internal fun encodeWebSearchResults(results: List<com.example.aichat.data.network.WebSearchResult>?): String? {
-    if (results.isNullOrEmpty()) return null
+    if (results == null) return null
     return runCatching {
         imagePathJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(com.example.aichat.data.network.WebSearchResult.serializer()), results)
     }.getOrNull()
@@ -126,4 +128,3 @@ internal fun resolveMessageBranches(
     }
     return resolved
 }
-

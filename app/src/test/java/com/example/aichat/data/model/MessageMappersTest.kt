@@ -6,6 +6,13 @@ import org.junit.Test
 
 class MessageMappersTest {
     @Test
+    fun `failed search state remains distinct from search disabled after persistence`() {
+        assertEquals("[]", encodeWebSearchResults(emptyList()))
+        assertEquals(emptyList<com.example.aichat.data.network.WebSearchResult>(), decodeWebSearchResults("[]"))
+        assertEquals(null, encodeWebSearchResults(null))
+    }
+
+    @Test
     fun `image paths and thinking fields survive Room json mapping`() {
         val original = ChatMessage(
             id = "message-1",

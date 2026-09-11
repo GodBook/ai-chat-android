@@ -41,6 +41,7 @@ data class BackupConversation(
     val createdAt: Long,
     val updatedAt: Long,
     val isPinned: Boolean = false,
+    val icon: String? = null,
 )
 
 @Serializable
@@ -122,6 +123,7 @@ object BackupRestoreManager {
                 createdAt = it.createdAt,
                 updatedAt = it.updatedAt,
                 isPinned = it.isPinned,
+                icon = it.icon,
             )
         }
 
@@ -145,7 +147,7 @@ object BackupRestoreManager {
         val manifest = BackupManifest(
             appVersion = appVersion,
             versionCode = versionCode,
-            schemaVersion = 6,
+            schemaVersion = 8,
             exportedAt = System.currentTimeMillis(),
             conversationCount = backupConversations.size,
             messageCount = backupMessages.size,
@@ -262,6 +264,7 @@ object BackupRestoreManager {
                 createdAt = conv.createdAt,
                 updatedAt = conv.updatedAt,
                 isPinned = conv.isPinned,
+                icon = conv.icon?.takeIf { it.length <= 100_000 },
             )
         }
 

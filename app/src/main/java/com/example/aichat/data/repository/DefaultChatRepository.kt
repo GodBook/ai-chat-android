@@ -28,6 +28,8 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -72,7 +74,10 @@ class DefaultChatRepository(
         .conflate()
         .flowOn(Dispatchers.IO)
 
-    override fun observeAnyWorking(): Flow<Boolean> = dao.observeAnyGenerating()
+    override val searchingConversation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    private var searchJob: Job? = null
+
+    override fun observeAnyWorking(): Flow<Boolean> = kotlinx.coroutines.flow.combine(dao.observeAnyGenerating(), searchingConversation) { generating, searching -> generating || searching != null }
         .distinctUntilChanged()
         .flowOn(Dispatchers.IO)
 
@@ -121,7 +126,7 @@ class DefaultChatRepository(
         }
 
         val searchResults = if (webSearch && cleanText.isNotEmpty()) {
-            runCatching { webSearchClient.search(cleanText) }.getOrNull()?.takeIf { it.isNotEmpty() }
+            searchForConversation(selectedConversationId, cleanText, dao.getForConversation(selectedConversationId).lastOrNull { it.role == MessageRole.USER.name }?.text)
         } else null
 
         val requestId = UUID.randomUUID().toString()
@@ -221,8 +226,11 @@ class DefaultChatRepository(
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
-        val userRequestMessage = if (target.webSearchResults != null) {
-            val searchContext = buildWebSearchPrompt(user.text, target.webSearchResults)
+        val refreshedResults = if (target.webSearchResults != null) {
+            searchForConversation(selectedConversationId, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+        } else null
+        val userRequestMessage = if (refreshedResults != null) {
+            val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
             ChatRequestMessage(
                 role = MessageRole.USER,
                 text = "${user.text}\n\n$searchContext",
@@ -237,6 +245,7 @@ class DefaultChatRepository(
             .map { it.toRequestMessage() }
             .plus(userRequestMessage))
         val pending = target.copy(
+            webSearchResults = refreshedResults,
             text = "",
             thinkingContent = null,
             thinkingDurationMs = null,
@@ -273,8 +282,11 @@ class DefaultChatRepository(
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
-        val userRequestMessage = if (target.webSearchResults != null) {
-            val searchContext = buildWebSearchPrompt(user.text, target.webSearchResults)
+        val refreshedResults = if (target.webSearchResults != null) {
+            searchForConversation(selectedConversationId, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+        } else null
+        val userRequestMessage = if (refreshedResults != null) {
+            val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
             ChatRequestMessage(
                 role = MessageRole.USER,
                 text = "${user.text}\n\n$searchContext",
@@ -304,7 +316,7 @@ class DefaultChatRepository(
             createdAt = now,
             thinkingContent = null,
             thinkingDurationMs = null,
-            webSearchResults = target.webSearchResults,
+            webSearchResults = refreshedResults,
         )
         database.withTransaction {
             if (target.requestId == null) {
@@ -337,9 +349,11 @@ class DefaultChatRepository(
 
     override fun stopGeneration() {
         val jobToCancel = synchronized(activeRequestLock) {
-            val assistantId = activeAssistantId ?: return
-            stopRequestedFor = assistantId
-            activeJob
+            if (searchJob != null) searchJob else {
+                val assistantId = activeAssistantId ?: return
+                stopRequestedFor = assistantId
+                activeJob
+            }
         }
         jobToCancel?.cancel(CancellationException("用户停止生成"))
     }
@@ -403,6 +417,12 @@ class DefaultChatRepository(
             conversationDao.renameGroup(cleanOld, cleanNew, System.currentTimeMillis())
         }
     }
+
+    override suspend fun setConversationIcon(conversationId: String, icon: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            require(icon == null || icon.length <= 100_000) { "图标过大，请重新选择" }
+            conversationDao.setIcon(normalizeConversationId(conversationId), icon?.takeIf { it.isNotBlank() }) > 0
+        }
 
     override suspend fun renameConversation(
         conversationId: String,
@@ -628,7 +648,9 @@ class DefaultChatRepository(
 
     private suspend fun awaitActiveRequestIfNeeded(conversationId: String) {
         val runningJob = synchronized(activeRequestLock) {
-            if (activeConversationId == conversationId) {
+            if (searchingConversation.value == conversationId) {
+                searchJob
+            } else if (activeConversationId == conversationId) {
                 stopRequestedFor = activeAssistantId
                 activeJob
             } else {
@@ -643,6 +665,20 @@ class DefaultChatRepository(
         value.trim().ifEmpty { DEFAULT_CONVERSATION_ID }
 
     private fun normalizeTitle(value: String): String = value.trim().ifEmpty { "新聊天" }
+
+    private suspend fun searchForConversation(id: String, query: String, previousQuery: String?): List<com.example.aichat.data.network.WebSearchResult> = coroutineScope {
+        val child = async(Dispatchers.IO, start = CoroutineStart.LAZY) { webSearchClient.search(query, previousQuery = previousQuery) }
+        synchronized(activeRequestLock) { searchJob = child; searchingConversation.value = id }
+        try {
+            child.start()
+            child.await()
+        } catch (cancelled: CancellationException) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            throw ChatClientException(ChatErrorKind.INVALID_REQUEST, "已停止联网搜索")
+        } finally {
+            synchronized(activeRequestLock) { if (searchJob === child) { searchJob = null; searchingConversation.value = null } }
+        }
+    }
 
     private suspend fun <T> withRequestLock(
         block: suspend kotlinx.coroutines.CoroutineScope.() -> T,
@@ -884,26 +920,7 @@ class DefaultChatRepository(
     private fun buildWebSearchPrompt(
         query: String,
         results: List<com.example.aichat.data.network.WebSearchResult>,
-    ): String {
-        val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val formattedResults = results.mapIndexed { index, r ->
-            "[来源 ${index + 1}] ${r.title}\n网址: ${r.url}\n摘要: ${r.snippet}"
-        }.joinToString("\n\n")
-
-        return """
-        [系统提示：互联网实时检索结果已就绪]
-        当前基准日期: $dateStr
-        检索关键词: $query
-
-        以下为互联网最新实时检索结果：
-        $formattedResults
-
-        【重要回答准则】
-        1. 请优先依据上述最新网络检索事实回答用户的问题，确保人名、职务、时间、数据等时效性信息准确无误。
-        2. 若用户询问当前/最新的客观事实，严禁使用模型过期的预训练知识进行臆测或捏造；以检索到的最新事实为准。
-        3. 回答请自然流畅，并在引用关键事实处适度注明参考来源编号（如 [来源 1]）。
-        """.trimIndent()
-    }
+    ): String = com.example.aichat.data.network.buildSearchContext(query, results, java.time.Clock.systemDefaultZone())
 
     private companion object {
         const val STREAM_PERSIST_INTERVAL_MS = 120L

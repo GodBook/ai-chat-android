@@ -1,6 +1,10 @@
 package com.example.aichat.data.network
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import okhttp3.OkHttpClient
@@ -8,6 +12,8 @@ import okhttp3.Request
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import java.time.Clock
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 @Serializable
 data class WebSearchResult(
@@ -18,10 +24,17 @@ data class WebSearchResult(
 
 class WebSearchClient(
     httpClient: OkHttpClient? = null,
+    private val clock: Clock = Clock.systemDefaultZone(),
+    private val soEndpoint: String = "https://www.so.com/s",
+    private val bingEndpoint: String = "https://cn.bing.com/search",
+    private val globalBingEndpoint: String = "https://www.bing.com/search",
+    private val geocodingEndpoint: String = "https://geocoding-api.open-meteo.com/v1/search",
+    private val forecastEndpoint: String = "https://api.open-meteo.com/v1/forecast",
 ) {
     private val client = httpClient ?: OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(18, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -72,34 +85,32 @@ class WebSearchClient(
             title.contains("的拼音,部首,笔画")
     }
 
-    suspend fun search(query: String, maxResults: Int = 5): List<WebSearchResult> = withContext(Dispatchers.IO) {
-        val cleanQuery = cleanSearchQuery(query)
-        if (cleanQuery.isBlank()) return@withContext emptyList()
-
-        // 1. Try 360 Search (Fast, accurate Chinese news and fact search, no anti-crawler block)
-        val soResults = runCatching { fetchSoResults(cleanQuery, maxResults) }.getOrNull()
-        if (!soResults.isNullOrEmpty()) {
-            return@withContext soResults
+    suspend fun search(query: String, maxResults: Int = 5, previousQuery: String? = null): List<WebSearchResult> = withContext(Dispatchers.IO) {
+        if (query.isBlank() || maxResults <= 0) return@withContext emptyList()
+        val effectiveQuery = if (query.length <= 24 && Regex("^(那|那么)?(明天|后天|今天|现在|最新).{0,8}$").matches(query.trim()) && previousQuery != null) {
+            val place = extractWeatherPlace(previousQuery)
+            if (place != null && Regex("天气|气温|下雨|下雪").containsMatchIn(previousQuery)) "$place 天气 $query" else query
+        } else query
+        val weather = safely { WeatherSearchClient(client, clock, geocodingEndpoint, forecastEndpoint).search(effectiveQuery, previousQuery) }
+        if (weather != null) return@withContext listOf(weather)
+        val plan = planSearch(cleanSearchQuery(effectiveQuery), clock)
+        val all = coroutineScope {
+            listOf(
+                async { safely { fetchSoResults(plan.query, 10) }.orEmpty() },
+                async { safely { fetchBingResults(bingEndpoint, plan.query, 10, plan.timeSensitive) }.orEmpty() },
+                async { safely { fetchBingResults(globalBingEndpoint, plan.query, 10, plan.timeSensitive) }.orEmpty() },
+            ).awaitAll().flatten()
         }
-
-        // 2. Try China Bing endpoint with cleaned query
-        val cnResults = runCatching { fetchBingResults("https://cn.bing.com/search", cleanQuery, maxResults) }.getOrNull()
-        if (!cnResults.isNullOrEmpty()) {
-            return@withContext cnResults
-        }
-
-        // 3. Fallback to global Bing endpoint
-        val globalResults = runCatching { fetchBingResults("https://www.bing.com/search", cleanQuery, maxResults) }.getOrNull()
-        if (!globalResults.isNullOrEmpty()) {
-            return@withContext globalResults
-        }
-
-        emptyList()
+        rankSearchResults(all, plan, maxResults)
     }
 
-    private fun fetchSoResults(query: String, maxResults: Int): List<WebSearchResult> {
+    private suspend fun <T> safely(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) { null }
+
+    private suspend fun fetchSoResults(query: String, maxResults: Int): List<WebSearchResult> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val url = "https://www.so.com/s?q=$encodedQuery"
+        val url = "$soEndpoint?q=$encodedQuery"
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -107,7 +118,7 @@ class WebSearchClient(
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             .build()
 
-        client.newCall(request).execute().use { response ->
+        client.searchResponse(request).use { response ->
             if (!response.isSuccessful) return emptyList()
             val html = response.body?.string().orEmpty()
             return parseSoHtml(html, maxResults)
@@ -124,7 +135,8 @@ class WebSearchClient(
             val linkMatcher = soLinkPattern.matcher(block)
             if (!linkMatcher.find()) continue
 
-            val rawUrl = linkMatcher.group(1).orEmpty().trim()
+            val directUrl = Regex("data-mdurl=[\"']([^\"']+)[\"']").find(linkMatcher.group())?.groupValues?.get(1)
+            val rawUrl = normalizeResultUrl(directUrl ?: linkMatcher.group(1).orEmpty().trim()) ?: continue
             val rawTitle = linkMatcher.group(2).orEmpty()
             val cleanTitle = cleanHtmlText(rawTitle)
 
@@ -141,6 +153,13 @@ class WebSearchClient(
                 }
             }
 
+            if (snippet.isBlank()) {
+                snippet = Regex("<span[^>]*class=[\"'][^\"']*res-list-summary[^\"']*[\"'][^>]*>(.*?)</span>", RegexOption.DOT_MATCHES_ALL)
+                    .find(block)?.groupValues?.get(1)?.let(::cleanHtmlText).orEmpty()
+            }
+            val dateText = Regex("<span[^>]*class=[\"'][^\"']*g-c-gray[^\"']*[\"'][^>]*>(.*?)</span>", RegexOption.DOT_MATCHES_ALL)
+                .find(block)?.groupValues?.get(1)?.let(::cleanHtmlText).orEmpty()
+            if (dateText.isNotBlank() && !snippet.contains(dateText)) snippet = "$dateText $snippet"
             if (snippet.isNotBlank()) {
                 results.add(
                     WebSearchResult(
@@ -154,9 +173,9 @@ class WebSearchClient(
         return results
     }
 
-    private fun fetchBingResults(baseUrl: String, query: String, maxResults: Int): List<WebSearchResult> {
+    private suspend fun fetchBingResults(baseUrl: String, query: String, maxResults: Int, recent: Boolean): List<WebSearchResult> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val url = "$baseUrl?q=$encodedQuery"
+        val url = "$baseUrl?q=$encodedQuery" + if (recent) "&filters=ex1%3A%22ez1%22" else ""
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -164,7 +183,7 @@ class WebSearchClient(
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             .build()
 
-        client.newCall(request).execute().use { response ->
+        client.searchResponse(request).use { response ->
             if (!response.isSuccessful) return emptyList()
             val html = response.body?.string().orEmpty()
             return parseBingHtml(html, maxResults)
@@ -181,7 +200,7 @@ class WebSearchClient(
             val linkMatcher = bingLinkPattern.matcher(block)
             if (!linkMatcher.find()) continue
 
-            val rawUrl = linkMatcher.group(1).orEmpty().trim()
+            val rawUrl = normalizeResultUrl(linkMatcher.group(1).orEmpty().trim()) ?: continue
             val rawTitle = linkMatcher.group(2).orEmpty()
             val cleanTitle = cleanHtmlText(rawTitle)
 
@@ -211,8 +230,21 @@ class WebSearchClient(
     }
 
     private fun cleanHtmlText(raw: String): String {
-        val noTags = htmlTagPattern.matcher(raw).replaceAll(" ")
+        val blocksSeparated = raw.replace(Regex("</(?:p|div|li)>|<br\\s*/?>", RegexOption.IGNORE_CASE), " ")
+        val noTags = htmlTagPattern.matcher(blocksSeparated).replaceAll("")
         return unescapeHtml(noTags).trim().replace(Regex("\\s+"), " ")
+    }
+
+    internal fun normalizeResultUrl(raw: String): String? {
+        val url = unescapeHtml(raw).toHttpUrlOrNull() ?: return null
+        if (url.host.endsWith("bing.com") && url.encodedPath == "/ck/a") {
+            val encoded = url.queryParameter("u")?.removePrefix("a1") ?: return null
+            return runCatching { String(java.util.Base64.getUrlDecoder().decode(encoded), Charsets.UTF_8).toHttpUrlOrNull()?.toString() }.getOrNull()
+        }
+        if (url.host.endsWith("so.com") && url.encodedPath == "/link") {
+            return url.queryParameter("url")?.toHttpUrlOrNull()?.toString()
+        }
+        return url.toString()
     }
 
     private fun unescapeHtml(text: String): String {
@@ -233,6 +265,12 @@ class WebSearchClient(
         res = res.replace("&#8230;", "…")
         res = res.replace("&#183;", "·")
         res = res.replace("&#8212;", "—")
-        return res
+        return res.replace(Regex("&#(x[0-9a-fA-F]+|[0-9]+);")) { match ->
+            runCatching {
+                val value = match.groupValues[1]
+                val code = if (value.startsWith("x")) value.drop(1).toInt(16) else value.toInt()
+                String(Character.toChars(code))
+            }.getOrDefault(match.value)
+        }
     }
 }

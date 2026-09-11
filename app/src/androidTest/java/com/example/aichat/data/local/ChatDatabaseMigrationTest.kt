@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,7 +76,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8)
             .build()
         roomDatabase = migrated
 
@@ -121,7 +122,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8)
             .build()
         roomDatabase = migrated
 
@@ -150,7 +151,7 @@ class ChatDatabaseMigrationTest {
                 """
                 CREATE TABLE IF NOT EXISTS `chat_messages` (
                     `id` TEXT NOT NULL,
-                    `conversationId` TEXT NOT NULL,
+                    `conversationId` TEXT NOT NULL DEFAULT 'default',
                     `role` TEXT NOT NULL,
                     `text` TEXT NOT NULL,
                     `imagePaths` TEXT NOT NULL,
@@ -168,10 +169,15 @@ class ChatDatabaseMigrationTest {
                 "INSERT INTO `chat_conversations` (`id`, `title`, `createdAt`, `updatedAt`) VALUES ('chat-1', '测试聊天', 100, 200)",
             )
             db.version = 4
+            db.execSQL("CREATE INDEX index_chat_conversations_updatedAt ON chat_conversations(updatedAt)")
+            db.execSQL("CREATE INDEX index_chat_messages_createdAt ON chat_messages(createdAt)")
+            db.execSQL("CREATE INDEX index_chat_messages_requestId ON chat_messages(requestId)")
+            db.execSQL("CREATE INDEX index_chat_messages_conversationId ON chat_messages(conversationId)")
+            db.execSQL("CREATE INDEX index_chat_messages_conversationId_createdAt_id ON chat_messages(conversationId, createdAt, id)")
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_4_5)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8)
             .build()
         roomDatabase = migrated
 
@@ -183,6 +189,37 @@ class ChatDatabaseMigrationTest {
 
         migrated.chatConversationDao().updateGroup("chat-1", "工作", 300)
         assertEquals("工作", migrated.chatConversationDao().getById("chat-1")?.groupName)
+    }
+
+    @Test
+    fun migrationFromVersion7PreservesChatsAndSavesIndividualIcons() = runBlocking {
+        context.openOrCreateDatabase(DATABASE_NAME, Context.MODE_PRIVATE, null).use { db ->
+            db.execSQL("CREATE TABLE chat_conversations (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, groupName TEXT, isPinned INTEGER NOT NULL DEFAULT 0)")
+            db.execSQL("CREATE INDEX index_chat_conversations_updatedAt ON chat_conversations(updatedAt)")
+            db.execSQL("CREATE INDEX index_chat_conversations_isPinned_updatedAt ON chat_conversations(isPinned, updatedAt)")
+            db.execSQL("CREATE TABLE chat_messages (id TEXT NOT NULL PRIMARY KEY, role TEXT NOT NULL, text TEXT NOT NULL, imagePaths TEXT NOT NULL, status TEXT NOT NULL, requestId TEXT, createdAt INTEGER NOT NULL, errorMessage TEXT, conversationId TEXT NOT NULL DEFAULT 'default', thinkingContent TEXT, thinkingDurationMs INTEGER, webSearchResults TEXT)")
+            db.execSQL("CREATE INDEX index_chat_messages_createdAt ON chat_messages(createdAt)")
+            db.execSQL("CREATE INDEX index_chat_messages_requestId ON chat_messages(requestId)")
+            db.execSQL("CREATE INDEX index_chat_messages_conversationId ON chat_messages(conversationId)")
+            db.execSQL("CREATE INDEX index_chat_messages_conversationId_createdAt_id ON chat_messages(conversationId, createdAt, id)")
+            db.execSQL("INSERT INTO chat_conversations VALUES ('one','保留聊天',100,200,'工作',1), ('two','第二个聊天',101,201,NULL,0)")
+            db.execSQL("INSERT INTO chat_messages (id,role,text,imagePaths,status,createdAt,conversationId) VALUES ('message','USER','保留消息','[]','SENT',100,'one')")
+            db.version = 7
+        }
+        val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME).addMigrations(ChatDatabase.MIGRATION_7_8).build()
+        roomDatabase = migrated
+        assertEquals("保留消息", migrated.chatMessageDao().getAll().single().text)
+        val original = migrated.chatConversationDao().getById("one")!!
+        assertNull(original.icon)
+        assertEquals(true, original.isPinned)
+        migrated.chatConversationDao().setIcon("one", "🧠")
+        assertNull(migrated.chatConversationDao().getById("two")!!.icon)
+        migrated.close()
+        val reopened = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME).build()
+        roomDatabase = reopened
+        assertEquals(original.copy(icon = "🧠"), reopened.chatConversationDao().getById("one"))
+        reopened.chatConversationDao().setIcon("one", null)
+        assertNull(reopened.chatConversationDao().getById("one")!!.icon)
     }
 
     private companion object {

@@ -146,6 +146,7 @@ class ConfigStoreTest {
         store.update(
             baseUrl = DEFAULT_BASE_URL,
             model = FALLBACK_MODEL,
+            visionEnabled = false,
         )
 
         store.updateModelPreset(
@@ -163,6 +164,7 @@ class ConfigStoreTest {
         store.update(
             baseUrl = "https://custom-gateway.mycorp.internal/v1",
             model = FALLBACK_MODEL,
+            visionEnabled = false,
         )
 
         store.updateModelPreset(

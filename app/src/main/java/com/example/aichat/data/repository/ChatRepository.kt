@@ -21,6 +21,9 @@ data class AppStorageStats(
 )
 
 interface ChatRepository {
+    val searchingConversation: Flow<String?>
+        get() = kotlinx.coroutines.flow.flowOf(null)
+
     /** All saved chats, ordered by most recently changed. */
     val conversations: Flow<List<ChatConversation>>
         get() = emptyFlow()
@@ -57,6 +60,8 @@ interface ChatRepository {
         throw UnsupportedOperationException("多会话功能未由此仓储实现")
 
     suspend fun renameConversation(conversationId: String, title: String): ChatConversation? = null
+
+    suspend fun setConversationIcon(conversationId: String, icon: String?): Boolean = false
 
     suspend fun setConversationPinned(conversationId: String, isPinned: Boolean): ChatConversation? = null
 

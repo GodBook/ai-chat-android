@@ -135,6 +135,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onRenameGroup = viewModel::renameGroup,
                     onToggleGroupCollapsed = viewModel::toggleGroupCollapsed,
                     onTogglePinConversation = viewModel::togglePinConversation,
+                    onSetConversationIcon = viewModel::setConversationIcon,
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 )
             }

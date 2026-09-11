@@ -1402,8 +1402,11 @@ internal fun SettingsScreen(
 
             // 5. 关于与更新卡片
             var showAdvancedUpdate by rememberSaveable { mutableStateOf(false) }
+            var showReleaseHistory by rememberSaveable { mutableStateOf(false) }
+            if (showReleaseHistory) ReleaseHistoryDialog(onDismiss = { showReleaseHistory = false })
 
             SettingsCard {
+                Text("版本更新", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1473,6 +1476,8 @@ internal fun SettingsScreen(
                         }
                     }
                 }
+
+                TextButton(onClick = { showReleaseHistory = true }) { Text("查看历史更新") }
 
                 when (val update = state.updateState) {
                     is UpdateUiState.UpToDate -> {

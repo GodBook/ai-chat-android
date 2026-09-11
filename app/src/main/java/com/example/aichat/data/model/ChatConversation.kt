@@ -17,5 +17,5 @@ data class ChatConversation(
     val updatedAt: Long,
     val groupName: String? = null,
     val isPinned: Boolean = false,
+    val icon: String? = null,
 )
-

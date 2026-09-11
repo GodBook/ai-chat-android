@@ -18,6 +18,9 @@ interface ChatConversationDao {
     @Query("UPDATE chat_conversations SET isPinned = :isPinned WHERE id = :id")
     suspend fun setPinned(id: String, isPinned: Boolean): Int
 
+    @Query("UPDATE chat_conversations SET icon = :icon WHERE id = :id")
+    suspend fun setIcon(id: String, icon: String?): Int
+
     @Query("SELECT * FROM chat_conversations WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ChatConversationEntity?
 

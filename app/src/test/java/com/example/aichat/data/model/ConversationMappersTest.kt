@@ -13,6 +13,7 @@ class ConversationMappersTest {
             title = "工作问题",
             createdAt = 10L,
             updatedAt = 20L,
+            icon = "🧠",
         )
         val message = ChatMessage(
             id = "message-1",

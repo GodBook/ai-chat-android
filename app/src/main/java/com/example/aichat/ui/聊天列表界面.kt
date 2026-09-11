@@ -128,12 +128,14 @@ internal fun ContactsScreen(
     onRenameGroup: (String, String) -> Unit = { _, _ -> },
     onToggleGroupCollapsed: (String) -> Unit = {},
     onTogglePinConversation: (String) -> Unit = {},
+    onSetConversationIcon: (String, String?) -> Unit = { _, _ -> },
     onOpenSettings: () -> Unit,
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var renameTarget by remember { mutableStateOf<ChatConversation?>(null) }
+    var iconTarget by remember { mutableStateOf<ChatConversation?>(null) }
     var setGroupTarget by remember { mutableStateOf<ChatConversation?>(null) }
     var renameGroupTarget by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<ChatConversation?>(null) }
@@ -383,6 +385,7 @@ internal fun ContactsScreen(
                                     setGroupTarget = conversation
                                 },
                                 onDelete = { deleteTarget = conversation },
+                                onSetIcon = { iconTarget = conversation },
                                 onExport = { onExportConversation(conversation.id) },
                                 onTogglePin = { onTogglePinConversation(conversation.id) },
                             )
@@ -391,6 +394,17 @@ internal fun ContactsScreen(
                 }
             }
         }
+    }
+
+    iconTarget?.let { target ->
+        ConversationIconDialog(
+            currentIcon = target.icon,
+            onDismiss = { iconTarget = null },
+            onConfirm = { icon ->
+                onSetConversationIcon(target.id, icon)
+                iconTarget = null
+            },
+        )
     }
 
     if (showCreateDialog) {
@@ -511,6 +525,7 @@ private fun ConversationRow(
     onDelete: () -> Unit,
     onExport: () -> Unit,
     onTogglePin: () -> Unit,
+    onSetIcon: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val isRowHighlighted = (isSelectionMode && isChecked) || (!isSelectionMode && selected)
@@ -570,7 +585,9 @@ private fun ConversationRow(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                     }
-                    AiAvatar(size = 50.dp)
+                    Box(Modifier.clip(CircleShape).clickable(enabled = !isSelectionMode, onClickLabel = "自定义聊天图标", onClick = onSetIcon)) {
+                        ConversationAvatar(icon = conversation.icon, size = 50.dp)
+                    }
                 }
             },
             headlineContent = {
@@ -647,6 +664,11 @@ private fun ConversationRow(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("自定义图标") },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                onClick = { menuExpanded = false; onSetIcon() },
+                            )
                             DropdownMenuItem(
                                 text = { Text(if (conversation.isPinned) "取消置顶" else "置顶聊天") },
                                 leadingIcon = {
