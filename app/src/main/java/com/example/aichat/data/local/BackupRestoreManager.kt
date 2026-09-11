@@ -40,6 +40,7 @@ data class BackupConversation(
     val groupName: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    val isPinned: Boolean = false,
 )
 
 @Serializable
@@ -120,6 +121,7 @@ object BackupRestoreManager {
                 groupName = it.groupName,
                 createdAt = it.createdAt,
                 updatedAt = it.updatedAt,
+                isPinned = it.isPinned,
             )
         }
 
@@ -259,6 +261,7 @@ object BackupRestoreManager {
                 groupName = conv.groupName,
                 createdAt = conv.createdAt,
                 updatedAt = conv.updatedAt,
+                isPinned = conv.isPinned,
             )
         }
 

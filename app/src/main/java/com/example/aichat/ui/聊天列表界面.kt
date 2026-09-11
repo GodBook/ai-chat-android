@@ -49,6 +49,8 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
@@ -125,6 +127,7 @@ internal fun ContactsScreen(
     onSetConversationsGroup: (Set<String>, String?) -> Unit = { _, _ -> },
     onRenameGroup: (String, String) -> Unit = { _, _ -> },
     onToggleGroupCollapsed: (String) -> Unit = {},
+    onTogglePinConversation: (String) -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
@@ -381,6 +384,7 @@ internal fun ContactsScreen(
                                 },
                                 onDelete = { deleteTarget = conversation },
                                 onExport = { onExportConversation(conversation.id) },
+                                onTogglePin = { onTogglePinConversation(conversation.id) },
                             )
                         }
                     }
@@ -506,6 +510,7 @@ private fun ConversationRow(
     onSetGroup: () -> Unit,
     onDelete: () -> Unit,
     onExport: () -> Unit,
+    onTogglePin: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val isRowHighlighted = (isSelectionMode && isChecked) || (!isSelectionMode && selected)
@@ -552,6 +557,7 @@ private fun ConversationRow(
                 containerColor = when {
                     isSelectionMode && isChecked -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
                     !isSelectionMode && selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
+                    conversation.isPinned -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f)
                     else -> MaterialTheme.colorScheme.background
                 },
             ),
@@ -572,9 +578,17 @@ private fun ConversationRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    if (conversation.isPinned) {
+                        Icon(
+                            Icons.Default.PushPin,
+                            contentDescription = "已置顶",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
                     Text(
                         text = conversation.title,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = if (conversation.isPinned) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
@@ -633,6 +647,20 @@ private fun ConversationRow(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
                         ) {
+                            DropdownMenuItem(
+                                text = { Text(if (conversation.isPinned) "取消置顶" else "置顶聊天") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (conversation.isPinned) Icons.Outlined.PushPin else Icons.Default.PushPin,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onTogglePin()
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text("重命名") },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },

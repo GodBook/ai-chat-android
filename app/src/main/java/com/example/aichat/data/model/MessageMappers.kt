@@ -44,6 +44,7 @@ internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversat
     createdAt = createdAt,
     updatedAt = updatedAt,
     groupName = groupName,
+    isPinned = isPinned,
 )
 
 internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversationEntity(
@@ -52,6 +53,7 @@ internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversat
     createdAt = createdAt,
     updatedAt = updatedAt,
     groupName = groupName,
+    isPinned = isPinned,
 )
 
 internal fun String.toMessageRole(): MessageRole = runCatching {
@@ -82,3 +84,46 @@ internal fun decodeWebSearchResults(value: String?): List<com.example.aichat.dat
         imagePathJson.decodeFromString(kotlinx.serialization.builtins.ListSerializer(com.example.aichat.data.network.WebSearchResult.serializer()), value)
     }.getOrNull()
 }
+
+/**
+ * 将平铺的消息列表按 requestId 汇聚为分支视图。
+ * 同一 requestId 下的多个助手回复作为分支处理，默认或根据 [selectedBranches] 展示当前选中的分支。
+ */
+internal fun resolveMessageBranches(
+    messages: List<ChatMessage>,
+    selectedBranches: Map<String, Int> = emptyMap(),
+): List<ChatMessage> {
+    val assistantBranchesByReq = messages
+        .filter { it.role == MessageRole.ASSISTANT && it.requestId != null }
+        .groupBy { it.requestId!! }
+
+    val resolved = mutableListOf<ChatMessage>()
+    val seenReqIds = mutableSetOf<String>()
+
+    for (msg in messages) {
+        if (msg.role == MessageRole.USER) {
+            resolved.add(msg)
+        } else if (msg.role == MessageRole.ASSISTANT) {
+            val reqId = msg.requestId
+            if (reqId == null) {
+                resolved.add(msg)
+            } else {
+                if (seenReqIds.add(reqId)) {
+                    val branches = assistantBranchesByReq[reqId].orEmpty()
+                    val total = branches.size
+                    val defaultIdx = (total - 1).coerceAtLeast(0)
+                    val chosenIdx = selectedBranches[reqId]?.coerceIn(0, total - 1) ?: defaultIdx
+                    val chosenMsg = branches.getOrNull(chosenIdx) ?: msg
+                    resolved.add(
+                        chosenMsg.copy(
+                            branchIndex = chosenIdx,
+                            totalBranches = total,
+                        )
+                    )
+                }
+            }
+        }
+    }
+    return resolved
+}
+

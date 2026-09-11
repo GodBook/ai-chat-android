@@ -58,6 +58,8 @@ interface ChatRepository {
 
     suspend fun renameConversation(conversationId: String, title: String): ChatConversation? = null
 
+    suspend fun setConversationPinned(conversationId: String, isPinned: Boolean): ChatConversation? = null
+
     suspend fun updateConversationGroup(conversationId: String, groupName: String?): ChatConversation? = null
 
     suspend fun updateConversationsGroup(conversationIds: Collection<String>, groupName: String?): Int = 0

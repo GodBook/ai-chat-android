@@ -16,6 +16,7 @@ import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.model.ProviderConfig
+import com.example.aichat.data.model.resolveMessageBranches
 import com.example.aichat.data.model.toDomain
 import com.example.aichat.data.model.toEntity
 import com.example.aichat.data.network.ChatClientException
@@ -157,7 +158,9 @@ class DefaultChatRepository(
             user.toRequestMessage()
         }
         val history = database.withTransaction {
-            val requestHistory = limitContext(dao.getForConversation(selectedConversationId).map { it.toDomain() }
+            val rawMessages = dao.getForConversation(selectedConversationId).map { it.toDomain() }
+            val activeMessages = resolveMessageBranches(rawMessages)
+            val requestHistory = limitContext(activeMessages
                 .filter { it.status == MessageStatus.SENT }
                 .map { it.toRequestMessage() }
                 .plus(userRequestMessage))
@@ -228,7 +231,8 @@ class DefaultChatRepository(
         } else {
             user.toRequestMessage()
         }
-        val history = limitContext(all.take(userIndex.coerceAtLeast(0))
+        val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
+        val history = limitContext(activePriorHistory
             .filter { it.status == MessageStatus.SENT }
             .map { it.toRequestMessage() }
             .plus(userRequestMessage))
@@ -279,20 +283,38 @@ class DefaultChatRepository(
         } else {
             user.toRequestMessage()
         }
-        val history = limitContext(all.take(userIndex.coerceAtLeast(0))
+        val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
+        val history = limitContext(activePriorHistory
             .filter { it.status == MessageStatus.SENT }
             .map { it.toRequestMessage() }
             .plus(userRequestMessage))
-        val pending = target.copy(
+
+        val commonRequestId = target.requestId ?: user.requestId ?: java.util.UUID.randomUUID().toString()
+        val newAssistantId = java.util.UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val pending = ChatMessage(
+            id = newAssistantId,
+            conversationId = selectedConversationId,
+            role = MessageRole.ASSISTANT,
             text = "",
-            thinkingContent = null,
-            thinkingDurationMs = null,
             status = MessageStatus.SENDING,
             errorMessage = null,
+            imagePaths = emptyList(),
+            requestId = commonRequestId,
+            createdAt = now,
+            thinkingContent = null,
+            thinkingDurationMs = null,
+            webSearchResults = target.webSearchResults,
         )
         database.withTransaction {
-            dao.update(pending.toEntity())
-            conversationDao.touch(selectedConversationId, System.currentTimeMillis())
+            if (target.requestId == null) {
+                dao.update(target.copy(requestId = commonRequestId).toEntity())
+            }
+            if (user.requestId == null) {
+                dao.update(user.copy(requestId = commonRequestId).toEntity())
+            }
+            dao.insert(pending.toEntity())
+            conversationDao.touch(selectedConversationId, now)
         }
         val completed = runGenerationInChild(this, config, history, pending)
         completed.throwIfUnsuccessful()
@@ -390,6 +412,20 @@ class DefaultChatRepository(
         val id = normalizeConversationId(conversationId)
         return withContext(Dispatchers.IO) {
             if (conversationDao.rename(id, cleanTitle, System.currentTimeMillis()) == 0) {
+                null
+            } else {
+                conversationDao.getById(id)?.toDomain()
+            }
+        }
+    }
+
+    override suspend fun setConversationPinned(
+        conversationId: String,
+        isPinned: Boolean,
+    ): ChatConversation? {
+        val id = normalizeConversationId(conversationId)
+        return withContext(Dispatchers.IO) {
+            if (conversationDao.setPinned(id, isPinned) == 0) {
                 null
             } else {
                 conversationDao.getById(id)?.toDomain()
@@ -558,7 +594,10 @@ class DefaultChatRepository(
     }
 
     override suspend fun probeModelConnection(config: ProviderConfig): ProbeResult {
-        return client.probeConnection(config)
+        val effectiveConfig = if (config.apiKey.isNullOrBlank()) {
+            config.copy(apiKey = apiKeyStore.read())
+        } else config
+        return client.probeConnection(effectiveConfig)
     }
 
     private suspend fun readProviderConfig(): ProviderConfig {
@@ -852,14 +891,17 @@ class DefaultChatRepository(
         }.joinToString("\n\n")
 
         return """
-        [系统实时网络检索]
-        检索日期: $dateStr
-        关键词: $query
+        [系统提示：互联网实时检索结果已就绪]
+        当前基准日期: $dateStr
+        检索关键词: $query
 
-        以下为互联网实时检索结果：
+        以下为互联网最新实时检索结果：
         $formattedResults
 
-        请结合上述检索到的最新信息并根据自身知识回答用户提问。如回答引用了相关事实，请在相应位置适度标明参考来源。
+        【重要回答准则】
+        1. 请优先依据上述最新网络检索事实回答用户的问题，确保人名、职务、时间、数据等时效性信息准确无误。
+        2. 若用户询问当前/最新的客观事实，严禁使用模型过期的预训练知识进行臆测或捏造；以检索到的最新事实为准。
+        3. 回答请自然流畅，并在引用关键事实处适度注明参考来源编号（如 [来源 1]）。
         """.trimIndent()
     }
 

@@ -36,6 +36,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
+import com.example.aichat.data.model.PROMPT_TEMPLATES
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -131,6 +134,7 @@ internal fun ChatScreen(
     onExportMarkdown: () -> Unit = {},
     onExportImage: (Boolean) -> Unit = {},
     onToggleWebSearch: () -> Unit = {},
+    onSwitchBranch: (requestId: String, newIndex: Int) -> Unit = { _, _ -> },
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -393,6 +397,11 @@ internal fun ChatScreen(
                             onEditPrompt = { prompt ->
                                 draft = prompt
                             },
+                            onSwitchBranch = { newIdx ->
+                                message.requestId?.let { reqId ->
+                                    onSwitchBranch(reqId, newIdx)
+                                }
+                            },
                         )
                     }
                 }
@@ -498,6 +507,86 @@ private fun EmptyConversation(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun SlashCommandSuggestions(
+    query: String,
+    onSelectCommand: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val matchingTemplates = remember(query) {
+        PROMPT_TEMPLATES.filter { item ->
+            item.command.startsWith(query, ignoreCase = true) ||
+                item.title.contains(query.removePrefix("/"), ignoreCase = true)
+        }
+    }
+    if (matchingTemplates.isEmpty()) return
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 3.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            0.5.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+        ),
+        modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(6.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "快捷指令",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "点击直接套用",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                )
+            }
+            matchingTemplates.take(4).forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onSelectCommand(item.template) }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = item.command,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = item.description,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun Composer(
     draft: String,
     selectedImages: List<String>,
@@ -511,6 +600,17 @@ private fun Composer(
     onStop: () -> Unit,
     onUsePrompt: (String) -> Unit,
 ) {
+    var showTemplateSheet by remember { mutableStateOf(false) }
+
+    if (showTemplateSheet) {
+        PromptTemplateBottomSheet(
+            onDismiss = { showTemplateSheet = false },
+            onSelectTemplate = { template ->
+                onDraftChange(template)
+            },
+        )
+    }
+
     Surface(
         tonalElevation = 3.dp,
         shadowElevation = 0.dp,
@@ -518,6 +618,14 @@ private fun Composer(
         modifier = Modifier.imePadding(),
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            if (draft.startsWith("/")) {
+                SlashCommandSuggestions(
+                    query = draft,
+                    onSelectCommand = { template ->
+                        onDraftChange(template)
+                    },
+                )
+            }
             if (draft.isBlank() && selectedImages.isEmpty() && !isWorking) {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
@@ -564,6 +672,17 @@ private fun Composer(
                     Icon(Icons.Default.AddPhotoAlternate, contentDescription = "选择图片")
                 }
                 IconButton(
+                    onClick = { showTemplateSheet = true },
+                    enabled = !isWorking,
+                ) {
+                    Icon(
+                        Icons.Default.FlashOn,
+                        contentDescription = "提示词模板",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                IconButton(
                     onClick = onToggleWebSearch,
                     enabled = !isWorking,
                     modifier = if (webSearchActive) {
@@ -583,7 +702,7 @@ private fun Composer(
                     value = draft,
                     onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("输入消息") },
+                    placeholder = { Text("输入消息（输入 / 查看快捷指令）") },
                     maxLines = 5,
                     shape = RoundedCornerShape(20.dp),
                     enabled = !isWorking,
@@ -620,6 +739,7 @@ private fun MessageBubble(
     onRegenerate: () -> Unit,
     onDelete: () -> Unit,
     onEditPrompt: (String) -> Unit,
+    onSwitchBranch: (Int) -> Unit = {},
 ) {
     val isUser = message.role == MessageRole.USER
     val clipboard = LocalClipboardManager.current
@@ -795,6 +915,57 @@ private fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 2.dp, start = 38.dp),
                 ) {
+                    if (message.totalBranches > 1) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    RoundedCornerShape(8.dp),
+                                )
+                                .padding(horizontal = 2.dp, vertical = 1.dp),
+                        ) {
+                            IconButton(
+                                onClick = { onSwitchBranch(message.branchIndex - 1) },
+                                enabled = message.branchIndex > 0 && !isWorking,
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "上一版本",
+                                    modifier = Modifier.size(13.dp),
+                                    tint = if (message.branchIndex > 0 && !isWorking) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                                    },
+                                )
+                            }
+                            Text(
+                                text = "${message.branchIndex + 1}/${message.totalBranches}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 3.dp),
+                            )
+                            IconButton(
+                                onClick = { onSwitchBranch(message.branchIndex + 1) },
+                                enabled = message.branchIndex < message.totalBranches - 1 && !isWorking,
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "下一版本",
+                                    modifier = Modifier.size(13.dp),
+                                    tint = if (message.branchIndex < message.totalBranches - 1 && !isWorking) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                                    },
+                                )
+                            }
+                        }
+                    }
                     TextButton(onClick = onRegenerate, enabled = !isWorking) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.size(3.dp))

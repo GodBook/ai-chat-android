@@ -52,8 +52,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.aichat.data.model.resolveMessageBranches
 import java.io.File
 import java.net.URI
 import java.util.concurrent.atomic.AtomicLong
@@ -153,6 +155,7 @@ class MainViewModel(
     private val storageStats = MutableStateFlow<AppStorageStats?>(null)
     private val backupRestoreState = MutableStateFlow<BackupRestoreUiState>(BackupRestoreUiState.Idle)
     private val webSearchActive = MutableStateFlow<Boolean?>(null)
+    private val selectedBranches = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val conversationGeneration = AtomicLong(0)
 
     private val conversationSelection: Flow<ConversationSelection> = combine(
@@ -178,12 +181,14 @@ class MainViewModel(
             repository.observeConversationPreviews(),
             selectedMessages,
             repository.observeAnyWorking(),
-        ) { conversations, previews, messages, anyWorking ->
+            selectedBranches,
+        ) { conversations, previews, messages, anyWorking, branches ->
+            val resolvedMessages = resolveMessageBranches(messages, branches)
             ConversationSnapshot(
                 conversations = conversations,
                 previews = previews,
                 selectedId = selection.selectedId,
-                selectedMessages = messages,
+                selectedMessages = resolvedMessages,
                 isAnyWorking = anyWorking,
             )
         }
@@ -435,6 +440,21 @@ class MainViewModel(
         }
     }
 
+    fun togglePinConversation(id: String) {
+        viewModelScope.launch {
+            try {
+                val conv = repository.getConversation(id) ?: return@launch
+                val nextPinned = !conv.isPinned
+                repository.setConversationPinned(id, nextPinned)
+                transientMessage.value = if (nextPinned) "已置顶该对话" else "已取消置顶"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
     fun deleteConversations(ids: Set<String>) {
         if (ids.isEmpty()) return
         val currentSelectedId = selectedConversationId.value
@@ -481,7 +501,8 @@ class MainViewModel(
             try {
                 val conversation = repository.getConversation(id)
                     ?: throw IllegalArgumentException("聊天不存在")
-                val messages = repository.observeMessages(id).first()
+                val rawMessages = repository.observeMessages(id).first()
+                val messages = resolveMessageBranches(rawMessages, selectedBranches.value)
                 if (messages.isEmpty()) {
                     throw IllegalArgumentException("当前聊天还没有消息")
                 }
@@ -507,7 +528,8 @@ class MainViewModel(
                 val targets = withContext(Dispatchers.IO) {
                     ids.mapNotNull { id ->
                         val conv = repository.getConversation(id) ?: return@mapNotNull null
-                        val msgs = repository.observeMessages(id).first()
+                        val rawMsgs = repository.observeMessages(id).first()
+                        val msgs = resolveMessageBranches(rawMsgs, selectedBranches.value)
                         conv to msgs
                     }
                 }
@@ -606,6 +628,10 @@ class MainViewModel(
         }
     }
 
+    fun switchMessageBranch(requestId: String, newIndex: Int) {
+        selectedBranches.update { it + (requestId to newIndex) }
+    }
+
     fun regenerate(messageId: String) {
         val conversationId = selectedConversationId.value ?: return
         if (uiState.value.isWorking) {
@@ -614,7 +640,11 @@ class MainViewModel(
         }
         viewModelScope.launch {
             try {
+                val targetReqId = uiState.value.messages.firstOrNull { it.id == messageId }?.requestId
                 repository.regenerateMessage(conversationId, messageId)
+                if (targetReqId != null) {
+                    selectedBranches.update { it - targetReqId }
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -626,7 +656,11 @@ class MainViewModel(
     fun deleteMessage(messageId: String) {
         viewModelScope.launch {
             try {
+                val targetReqId = uiState.value.messages.firstOrNull { it.id == messageId }?.requestId
                 repository.deleteMessage(messageId)
+                if (targetReqId != null) {
+                    selectedBranches.update { it - targetReqId }
+                }
                 transientMessage.value = "消息已删除"
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -869,10 +903,11 @@ class MainViewModel(
     fun testModelConnection(baseUrl: String, model: String, apiKey: String?) {
         viewModelScope.launch {
             probeState.value = ProbeUiState.Probing
+            val effectiveKey = if (!apiKey.isNullOrBlank()) apiKey.trim() else apiKeyStore.read()
             val config = ProviderConfig(
                 baseUrl = baseUrl,
                 model = model,
-                apiKey = apiKey,
+                apiKey = effectiveKey,
             )
             val result = repository.probeModelConnection(config)
             if (result.isSuccess) {

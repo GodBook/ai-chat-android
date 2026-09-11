@@ -66,4 +66,20 @@ class ConversationMappersTest {
         assertEquals("工作", entity.groupName)
         assertEquals(conversation, entity.toDomain())
     }
+
+    @Test
+    fun `conversation isPinned flag is preserved through Room mapping`() {
+        val pinnedConversation = ChatConversation(
+            id = "conv-pinned",
+            title = "重要日程",
+            createdAt = 100L,
+            updatedAt = 200L,
+            groupName = "个人",
+            isPinned = true,
+        )
+
+        val entity = pinnedConversation.toEntity()
+        assertEquals(true, entity.isPinned)
+        assertEquals(pinnedConversation, entity.toDomain())
+    }
 }

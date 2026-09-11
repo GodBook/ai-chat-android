@@ -8,6 +8,7 @@ import androidx.room.PrimaryKey
     tableName = "chat_conversations",
     indices = [
         Index(value = ["updatedAt"]),
+        Index(value = ["isPinned", "updatedAt"]),
     ],
 )
 data class ChatConversationEntity(
@@ -16,4 +17,5 @@ data class ChatConversationEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val groupName: String? = null,
+    val isPinned: Boolean = false,
 )

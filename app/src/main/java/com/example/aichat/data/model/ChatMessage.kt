@@ -156,6 +156,8 @@ data class ChatMessage(
     val thinkingContent: String? = null,
     val thinkingDurationMs: Long? = null,
     val webSearchResults: List<com.example.aichat.data.network.WebSearchResult>? = null,
+    val branchIndex: Int = 0,
+    val totalBranches: Int = 1,
 )
 
 data class ProviderConfig(

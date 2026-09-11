@@ -134,6 +134,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onSetConversationsGroup = viewModel::setConversationsGroup,
                     onRenameGroup = viewModel::renameGroup,
                     onToggleGroupCollapsed = viewModel::toggleGroupCollapsed,
+                    onTogglePinConversation = viewModel::togglePinConversation,
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 )
             }
@@ -162,6 +163,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onExportMarkdown = { viewModel.exportMarkdown(context) },
                     onExportImage = { includeThinking -> viewModel.exportImage(context, includeThinking) },
                     onToggleWebSearch = viewModel::toggleWebSearch,
+                    onSwitchBranch = viewModel::switchMessageBranch,
                 )
             }
             composable(Routes.SETTINGS) {

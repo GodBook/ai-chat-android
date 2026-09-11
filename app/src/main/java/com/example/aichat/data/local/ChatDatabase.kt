@@ -11,7 +11,7 @@ import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 
 @Database(
     entities = [ChatMessageEntity::class, ChatConversationEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -107,6 +107,14 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** Adds isPinned to chat_conversations. */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `isPinned` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_conversations_isPinned_updatedAt` ON `chat_conversations` (`isPinned`, `updatedAt`)")
+            }
+        }
+
         private val CREATE_DEFAULT_CONVERSATION = object : RoomDatabase.Callback() {
             override fun onCreate(database: SupportSQLiteDatabase) {
                 super.onCreate(database)
@@ -129,7 +137,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "ai_chat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()
                     .also { instance = it }
