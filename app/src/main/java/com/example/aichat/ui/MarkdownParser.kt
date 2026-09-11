@@ -1,5 +1,7 @@
 package com.example.aichat.ui
 
+import org.commonmark.ext.gfm.strikethrough.Strikethrough
+import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TableBlock
 import org.commonmark.ext.gfm.tables.TableCell
 import org.commonmark.ext.gfm.tables.TableRow
@@ -47,6 +49,7 @@ internal data class MarkdownSpanModel(
     val text: String,
     val bold: Boolean = false,
     val italic: Boolean = false,
+    val strikethrough: Boolean = false,
     val code: Boolean = false,
     val math: Boolean = false,
     val linkUrl: String? = null,
@@ -68,7 +71,7 @@ internal enum class MarkdownTableAlignment {
 
 internal object MarkdownDocumentParser {
     private val parser = Parser.builder()
-        .extensions(listOf(TablesExtension.create()))
+        .extensions(listOf(TablesExtension.create(), StrikethroughExtension.create()))
         .build()
 
     private val BLOCK_MATH_REGEX = Regex("""(?s)(?:\$\$|\\\[)([\s\S]+?)(?:\$\$|\\\])""")
@@ -241,6 +244,7 @@ internal object MarkdownDocumentParser {
             is SoftLineBreak, is HardLineBreak -> output.append("\n", style)
             is StrongEmphasis -> node.children().forEach { collectInline(it, style.copy(bold = true), output) }
             is Emphasis -> node.children().forEach { collectInline(it, style.copy(italic = true), output) }
+            is Strikethrough -> node.children().forEach { collectInline(it, style.copy(strikethrough = true), output) }
             is Link -> {
                 val linkedStyle = style.copy(linkUrl = safeExternalUrl(node.destination))
                 if (node.firstChild == null) {
@@ -266,6 +270,7 @@ internal object MarkdownDocumentParser {
             text = text,
             bold = style.bold,
             italic = style.italic,
+            strikethrough = style.strikethrough,
             code = style.code,
             math = style.math,
             linkUrl = style.linkUrl,
@@ -304,6 +309,7 @@ internal object MarkdownDocumentParser {
     private data class InlineStyle(
         val bold: Boolean = false,
         val italic: Boolean = false,
+        val strikethrough: Boolean = false,
         val code: Boolean = false,
         val math: Boolean = false,
         val linkUrl: String? = null,

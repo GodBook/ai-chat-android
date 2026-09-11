@@ -110,4 +110,11 @@ class MarkdownParserTest {
         val m3 = blocks[3] as MarkdownBlockModel.MathBlock
         assertTrue(m3.formula.contains("\\lim_{x \\to 0}"))
     }
+
+    @Test
+    fun `parses strikethrough formatting`() {
+        val paragraph = MarkdownDocumentParser.parse("这是一段 ~~删除的文字~~ 和正常文字。")
+            .single() as MarkdownBlockModel.Paragraph
+        assertTrue(paragraph.spans.any { it.text == "删除的文字" && it.strikethrough })
+    }
 }

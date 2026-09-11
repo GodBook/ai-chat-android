@@ -175,14 +175,14 @@ if (-not (Test-Path "dist")) {
 
 if (-not $SkipTests) {
     Write-Host "[TEST] Running unit tests..." -ForegroundColor Cyan
-    & ".\gradlew.bat" :app:testDebugUnitTest --no-daemon
+    & ".\gradlew.bat" :app:testDebugUnitTest
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Unit tests failed. Aborting release."
     }
 }
 
 Write-Host "[BUILD] Compiling Release APK..." -ForegroundColor Cyan
-& ".\gradlew.bat" :app:assembleRelease --no-daemon -PUPDATE_MANIFEST_URL="https://github.com/GodBook/ai-chat-android/releases/latest/download/latest.json"
+& ".\gradlew.bat" :app:assembleRelease -PUPDATE_MANIFEST_URL="https://github.com/GodBook/ai-chat-android/releases/latest/download/latest.json"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Compiling Release APK failed."
 }

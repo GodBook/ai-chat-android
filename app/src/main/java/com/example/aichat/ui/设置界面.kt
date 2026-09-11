@@ -725,7 +725,7 @@ internal fun SettingsScreen(
             SettingsTabItem("模型服务", Icons.Default.Tune),
             SettingsTabItem("对话偏好", Icons.Default.AutoAwesome),
             SettingsTabItem("截图助手", Icons.Default.SmartToy),
-            SettingsTabItem("数据关于", Icons.Default.FolderZip),
+            SettingsTabItem("数据与版本", Icons.Default.FolderZip),
         )
     }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }

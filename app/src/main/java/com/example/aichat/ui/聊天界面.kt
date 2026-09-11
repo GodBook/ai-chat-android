@@ -1452,7 +1452,11 @@ private fun MessageBubble(
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         Row(
-            modifier = Modifier.widthIn(max = 360.dp),
+            modifier = if (isUser) {
+                Modifier.widthIn(max = 360.dp)
+            } else {
+                Modifier.fillMaxWidth().padding(end = 8.dp)
+            },
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Bottom,
         ) {
