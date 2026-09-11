@@ -364,36 +364,38 @@ internal fun ContactsScreen(
 
                     if (!isCollapsed) {
                         items(convList, key = { it.id }) { conversation ->
-                            ConversationRow(
-                                conversation = conversation,
-                                preview = previews[conversation.id],
-                                selected = conversation.id == selectedConversationId,
-                                isSelectionMode = isSelectionMode,
-                                isChecked = conversation.id in selectedIds,
-                                onToggleCheck = {
-                                    selectedIds = if (conversation.id in selectedIds) {
-                                        selectedIds - conversation.id
-                                    } else {
-                                        selectedIds + conversation.id
-                                    }
-                                },
-                                onClick = { onOpenChat(conversation.id) },
-                                onLongClick = {
-                                    isSelectionMode = true
-                                    selectedIds = setOf(conversation.id)
-                                },
-                                onRename = {
-                                    titleDraft = conversation.title
-                                    renameTarget = conversation
-                                },
-                                onSetGroup = {
-                                    setGroupTarget = conversation
-                                },
-                                onDelete = { deleteTarget = conversation },
-                                onSetIcon = { iconTarget = conversation },
-                                onExport = { onExportConversation(conversation.id) },
-                                onTogglePin = { onTogglePinConversation(conversation.id) },
-                            )
+                            Box(modifier = Modifier.animateItem()) {
+                                ConversationRow(
+                                    conversation = conversation,
+                                    preview = previews[conversation.id],
+                                    selected = conversation.id == selectedConversationId,
+                                    isSelectionMode = isSelectionMode,
+                                    isChecked = conversation.id in selectedIds,
+                                    onToggleCheck = {
+                                        selectedIds = if (conversation.id in selectedIds) {
+                                            selectedIds - conversation.id
+                                        } else {
+                                            selectedIds + conversation.id
+                                        }
+                                    },
+                                    onClick = { onOpenChat(conversation.id) },
+                                    onLongClick = {
+                                        isSelectionMode = true
+                                        selectedIds = setOf(conversation.id)
+                                    },
+                                    onRename = {
+                                        titleDraft = conversation.title
+                                        renameTarget = conversation
+                                    },
+                                    onSetGroup = {
+                                        setGroupTarget = conversation
+                                    },
+                                    onDelete = { deleteTarget = conversation },
+                                    onSetIcon = { iconTarget = conversation },
+                                    onExport = { onExportConversation(conversation.id) },
+                                    onTogglePin = { onTogglePinConversation(conversation.id) },
+                                )
+                            }
                         }
                     }
                 }

@@ -110,6 +110,7 @@ data class MainUiState(
     val backupRestoreState: BackupRestoreUiState = BackupRestoreUiState.Idle,
     val webSearchActive: Boolean = false,
     val isTemporary: Boolean = false,
+    val isSearching: Boolean = false,
 )
 
 private data class ConversationSnapshot(
@@ -220,6 +221,7 @@ class MainViewModel(
     ) { conversationsState, settings, composer, searchingId ->
         val previews = conversationsState.previews.associateBy { it.conversationId }
         val isWebSearch = composer.webSearchActive ?: settings.config.defaultWebSearchEnabled
+        val isSearching = searchingId != null && searchingId == conversationsState.selectedId
         MainUiState(
             conversations = conversationsState.conversations,
             conversationPreviews = previews,
@@ -231,13 +233,14 @@ class MainViewModel(
             messages = conversationsState.selectedMessages,
             config = settings.config,
             selectedImagePaths = composer.images,
-            isWorking = conversationsState.selectedMessages.any { it.isGenerating() } || (searchingId != null && searchingId == conversationsState.selectedId),
+            isWorking = conversationsState.selectedMessages.any { it.isGenerating() } || isSearching,
             isAnyWorking = conversationsState.isAnyWorking,
             message = composer.message,
             draftToRestore = composer.draft,
             updateManifestUrl = settings.updateManifestUrl.ifBlank { BuildConfig.UPDATE_MANIFEST_URL },
             collapsedGroups = settings.collapsedGroups,
             webSearchActive = isWebSearch,
+            isSearching = isSearching,
         )
     }
 
@@ -261,6 +264,7 @@ class MainViewModel(
             isTemporary = true, selectedConversationId = temp.id, selectedConversationTitle = "临时对话",
             messages = temp.messages, selectedImagePaths = temp.images, isWorking = temp.working,
             isAnyWorking = state.isAnyWorking || temp.working, webSearchActive = temp.searchEnabled,
+            isSearching = temp.searching,
             draftToRestore = null,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())

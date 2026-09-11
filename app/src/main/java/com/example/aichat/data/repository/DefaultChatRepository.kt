@@ -125,10 +125,6 @@ class DefaultChatRepository(
             )
         }
 
-        val searchResults = if (webSearch && cleanText.isNotEmpty()) {
-            searchForConversation(selectedConversationId, config, cleanText, dao.getForConversation(selectedConversationId).lastOrNull { it.role == MessageRole.USER.name }?.text)
-        } else null
-
         val requestId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         val user = ChatMessage(
@@ -150,8 +146,50 @@ class DefaultChatRepository(
             requestId = requestId,
             // Keep the assistant after the user even when both are inserted in one transaction.
             createdAt = now + 1,
-            webSearchResults = searchResults,
+            webSearchResults = null,
         )
+
+        // Persist immediately so user message and AI response bubble appear instantly on screen
+        database.withTransaction {
+            dao.insertAll(listOf(user.toEntity(), assistant.toEntity()))
+            conversationDao.touch(selectedConversationId, now)
+        }
+
+        synchronized(activeRequestLock) {
+            activeAssistantId = assistant.id
+            activeConversationId = selectedConversationId
+            stopRequestedFor = null
+        }
+
+        val previousQuery = dao.getForConversation(selectedConversationId)
+            .filter { it.id != user.id && it.id != assistant.id }
+            .lastOrNull { it.role == MessageRole.USER.name }?.text
+
+        val searchResults = if (webSearch && cleanText.isNotEmpty()) {
+            try {
+                searchForConversation(selectedConversationId, config, cleanText, previousQuery)
+            } catch (cancelled: CancellationException) {
+                dao.update(assistant.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止").toEntity())
+                throw cancelled
+            } catch (failure: ChatClientException) {
+                val failureStatus = if (failure.message == "已停止联网搜索") MessageStatus.INTERRUPTED else MessageStatus.FAILED
+                dao.update(assistant.copy(status = failureStatus, errorMessage = failure.message).toEntity())
+                throw failure.asPersistedRequestFailure()
+            } catch (failure: Exception) {
+                dao.update(assistant.copy(status = MessageStatus.FAILED, errorMessage = failure.message ?: "联网搜索失败").toEntity())
+                throw ChatClientException(
+                    kind = ChatErrorKind.PROVIDER,
+                    message = failure.message ?: "联网搜索失败",
+                    cause = failure,
+                    requestWasPersisted = true,
+                )
+            }
+        } else null
+
+        if (searchResults != null) {
+            dao.update(assistant.copy(webSearchResults = searchResults).toEntity())
+        }
+
         val userRequestMessage = if (searchResults != null) {
             val searchContext = buildWebSearchPrompt(cleanText, searchResults)
             ChatRequestMessage(
@@ -162,16 +200,13 @@ class DefaultChatRepository(
         } else {
             user.toRequestMessage()
         }
-        val history = database.withTransaction {
+
+        val history = run {
             val rawMessages = dao.getForConversation(selectedConversationId).map { it.toDomain() }
-            val activeMessages = resolveMessageBranches(rawMessages)
-            val requestHistory = limitContext(activeMessages
+            val activeMessages = resolveMessageBranches(rawMessages.filter { it.id != assistant.id })
+            limitContext(activeMessages
                 .filter { it.status == MessageStatus.SENT }
-                .map { it.toRequestMessage() }
-                .plus(userRequestMessage))
-            dao.insertAll(listOf(user.toEntity(), assistant.toEntity()))
-            conversationDao.touch(selectedConversationId, now)
-            requestHistory
+                .map { if (it.id == user.id) userRequestMessage else it.toRequestMessage() })
         }
 
         val completed = try {
@@ -179,7 +214,7 @@ class DefaultChatRepository(
                 parentScope = this,
                 config = config,
                 history = history,
-                assistant = assistant,
+                assistant = if (searchResults != null) assistant.copy(webSearchResults = searchResults) else assistant,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -222,13 +257,48 @@ class DefaultChatRepository(
             all.firstOrNull { it.requestId == requestId && it.role == MessageRole.USER }
         } ?: all.lastOrNull { it.role == MessageRole.USER && it.createdAt < target.createdAt }
             ?: return@withRequestLock null
+        val userIndex = all.indexOfFirst { it.id == user.id }
         if (user.imagePaths.isNotEmpty() && !config.visionEnabled) {
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
-        val userIndex = all.indexOfFirst { it.id == user.id }
+        val pending = target.copy(
+            webSearchResults = null,
+            text = "",
+            thinkingContent = null,
+            thinkingDurationMs = null,
+            status = MessageStatus.SENDING,
+            errorMessage = null,
+        )
+        database.withTransaction {
+            dao.update(pending.toEntity())
+            conversationDao.touch(selectedConversationId, System.currentTimeMillis())
+        }
+        synchronized(activeRequestLock) {
+            activeAssistantId = pending.id
+            activeConversationId = selectedConversationId
+            stopRequestedFor = null
+        }
+
         val refreshedResults = if (target.webSearchResults != null) {
-            searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+            try {
+                searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+            } catch (cancelled: CancellationException) {
+                dao.update(pending.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止").toEntity())
+                throw cancelled
+            } catch (failure: ChatClientException) {
+                val failureStatus = if (failure.message == "已停止联网搜索") MessageStatus.INTERRUPTED else MessageStatus.FAILED
+                dao.update(pending.copy(status = failureStatus, errorMessage = failure.message).toEntity())
+                throw failure.asPersistedRequestFailure()
+            } catch (failure: Exception) {
+                dao.update(pending.copy(status = MessageStatus.FAILED, errorMessage = failure.message ?: "联网搜索失败").toEntity())
+                throw ChatClientException(kind = ChatErrorKind.PROVIDER, message = failure.message ?: "联网搜索失败", cause = failure, requestWasPersisted = true)
+            }
         } else null
+
+        if (refreshedResults != null) {
+            dao.update(pending.copy(webSearchResults = refreshedResults).toEntity())
+        }
+
         val userRequestMessage = if (refreshedResults != null) {
             val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
             ChatRequestMessage(
@@ -244,19 +314,8 @@ class DefaultChatRepository(
             .filter { it.status == MessageStatus.SENT }
             .map { it.toRequestMessage() }
             .plus(userRequestMessage))
-        val pending = target.copy(
-            webSearchResults = refreshedResults,
-            text = "",
-            thinkingContent = null,
-            thinkingDurationMs = null,
-            status = MessageStatus.SENDING,
-            errorMessage = null,
-        )
-        database.withTransaction {
-            dao.update(pending.toEntity())
-            conversationDao.touch(selectedConversationId, System.currentTimeMillis())
-        }
-        val completed = runGenerationInChild(this, config, history, pending)
+
+        val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending)
         completed.throwIfUnsuccessful()
         pending.id
     }
@@ -282,24 +341,6 @@ class DefaultChatRepository(
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
-        val refreshedResults = if (target.webSearchResults != null) {
-            searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
-        } else null
-        val userRequestMessage = if (refreshedResults != null) {
-            val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
-            ChatRequestMessage(
-                role = MessageRole.USER,
-                text = "${user.text}\n\n$searchContext",
-                imagePaths = user.imagePaths,
-            )
-        } else {
-            user.toRequestMessage()
-        }
-        val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
-        val history = limitContext(activePriorHistory
-            .filter { it.status == MessageStatus.SENT }
-            .map { it.toRequestMessage() }
-            .plus(userRequestMessage))
 
         val commonRequestId = target.requestId ?: user.requestId ?: java.util.UUID.randomUUID().toString()
         val newAssistantId = java.util.UUID.randomUUID().toString()
@@ -316,7 +357,7 @@ class DefaultChatRepository(
             createdAt = now,
             thinkingContent = null,
             thinkingDurationMs = null,
-            webSearchResults = refreshedResults,
+            webSearchResults = null,
         )
         database.withTransaction {
             if (target.requestId == null) {
@@ -328,7 +369,49 @@ class DefaultChatRepository(
             dao.insert(pending.toEntity())
             conversationDao.touch(selectedConversationId, now)
         }
-        val completed = runGenerationInChild(this, config, history, pending)
+        synchronized(activeRequestLock) {
+            activeAssistantId = pending.id
+            activeConversationId = selectedConversationId
+            stopRequestedFor = null
+        }
+
+        val refreshedResults = if (target.webSearchResults != null) {
+            try {
+                searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+            } catch (cancelled: CancellationException) {
+                dao.update(pending.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止").toEntity())
+                throw cancelled
+            } catch (failure: ChatClientException) {
+                val failureStatus = if (failure.message == "已停止联网搜索") MessageStatus.INTERRUPTED else MessageStatus.FAILED
+                dao.update(pending.copy(status = failureStatus, errorMessage = failure.message).toEntity())
+                throw failure.asPersistedRequestFailure()
+            } catch (failure: Exception) {
+                dao.update(pending.copy(status = MessageStatus.FAILED, errorMessage = failure.message ?: "联网搜索失败").toEntity())
+                throw ChatClientException(kind = ChatErrorKind.PROVIDER, message = failure.message ?: "联网搜索失败", cause = failure, requestWasPersisted = true)
+            }
+        } else null
+
+        if (refreshedResults != null) {
+            dao.update(pending.copy(webSearchResults = refreshedResults).toEntity())
+        }
+
+        val userRequestMessage = if (refreshedResults != null) {
+            val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
+            ChatRequestMessage(
+                role = MessageRole.USER,
+                text = "${user.text}\n\n$searchContext",
+                imagePaths = user.imagePaths,
+            )
+        } else {
+            user.toRequestMessage()
+        }
+        val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
+        val history = limitContext(activePriorHistory
+            .filter { it.status == MessageStatus.SENT }
+            .map { it.toRequestMessage() }
+            .plus(userRequestMessage))
+
+        val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending)
         completed.throwIfUnsuccessful()
         pending.id
     }

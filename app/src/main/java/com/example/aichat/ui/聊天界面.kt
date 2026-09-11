@@ -28,11 +28,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -457,25 +465,28 @@ internal fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(state.messages, key = { it.id }) { message ->
-                        MessageBubble(
-                            message = message,
-                            isWorking = state.isWorking,
-                            autoCollapseThinking = state.config.autoCollapseThinking,
-                            onRetry = { onRetry(message.id) },
-                            onRegenerate = { onRegenerate(message.id) },
-                            onDelete = { messageToDelete = message.id },
-                            onEditPrompt = {
-                                messageToEdit = message
-                            },
-                            onQuoteMessage = {
-                                quotedMessage = message
-                            },
-                            onSwitchBranch = { newIdx ->
-                                message.requestId?.let { reqId ->
-                                    onSwitchBranch(reqId, newIdx)
-                                }
-                            },
-                        )
+                        Box(modifier = Modifier.animateItem()) {
+                            MessageBubble(
+                                message = message,
+                                isWorking = state.isWorking,
+                                isSearching = state.isSearching && message.status == MessageStatus.SENDING && message.text.isEmpty(),
+                                autoCollapseThinking = state.config.autoCollapseThinking,
+                                onRetry = { onRetry(message.id) },
+                                onRegenerate = { onRegenerate(message.id) },
+                                onDelete = { messageToDelete = message.id },
+                                onEditPrompt = {
+                                    messageToEdit = message
+                                },
+                                onQuoteMessage = {
+                                    quotedMessage = message
+                                },
+                                onSwitchBranch = { newIdx ->
+                                    message.requestId?.let { reqId ->
+                                        onSwitchBranch(reqId, newIdx)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -796,56 +807,66 @@ private fun Composer(
                 )
             }
 
-            if (quotedMessage != null) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            AnimatedVisibility(
+                visible = quotedMessage != null,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                if (quotedMessage != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
                     ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Reply,
-                            contentDescription = "引用回复",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (quotedMessage.role == MessageRole.USER) "引用 用户 的消息" else "引用 AI 助手的回复",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = quotedMessage.text.lineSequence().firstOrNull()?.take(80) ?: "",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        IconButton(
-                            onClick = onCancelQuote,
-                            modifier = Modifier.size(24.dp),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         ) {
                             Icon(
-                                Icons.Default.Close,
-                                contentDescription = "取消引用",
+                                Icons.AutoMirrored.Filled.Reply,
+                                contentDescription = "引用回复",
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (quotedMessage.role == MessageRole.USER) "引用 用户 的消息" else "引用 AI 助手的回复",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = quotedMessage.text.lineSequence().firstOrNull()?.take(80) ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            IconButton(
+                                onClick = onCancelQuote,
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "取消引用",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            if (draft.isBlank() && selectedImages.isEmpty() && !isWorking) {
+            AnimatedVisibility(
+                visible = draft.isBlank() && selectedImages.isEmpty() && !isWorking,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -868,7 +889,11 @@ private fun Composer(
                 }
             }
 
-            if (selectedImages.isNotEmpty()) {
+            AnimatedVisibility(
+                visible = selectedImages.isNotEmpty(),
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -963,11 +988,20 @@ private fun Composer(
                         )
                     }
 
+                    val webSearchBg by animateColorAsState(
+                        targetValue = if (webSearchActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        label = "webSearchBg",
+                    )
+                    val webSearchFg by animateColorAsState(
+                        targetValue = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        label = "webSearchFg",
+                    )
+
                     Surface(
                         onClick = onToggleWebSearch,
                         enabled = !isWorking,
                         shape = RoundedCornerShape(18.dp),
-                        color = if (webSearchActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        color = webSearchBg,
                         modifier = Modifier.height(34.dp),
                     ) {
                         Row(
@@ -978,14 +1012,14 @@ private fun Composer(
                             Icon(
                                 Icons.Default.Language,
                                 contentDescription = null,
-                                tint = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = webSearchFg,
                                 modifier = Modifier.size(16.dp),
                             )
                             Text(
                                 text = if (webSearchActive) "联网开启" else "联网搜索",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = if (webSearchActive) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = webSearchFg,
                             )
                         }
                     }
@@ -996,11 +1030,21 @@ private fun Composer(
                     enabled = isWorking || draft.isNotBlank() || selectedImages.isNotEmpty(),
                     modifier = Modifier.size(40.dp),
                 ) {
-                    Icon(
-                        imageVector = if (isWorking) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
-                        contentDescription = if (isWorking) "停止生成" else "发送",
-                        modifier = Modifier.size(18.dp),
-                    )
+                    AnimatedContent(
+                        targetState = isWorking,
+                        transitionSpec = {
+                            (scaleIn(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn()).togetherWith(
+                                scaleOut(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut(),
+                            )
+                        },
+                        label = "sendStopMorph",
+                    ) { working ->
+                        Icon(
+                            imageVector = if (working) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (working) "停止生成" else "发送",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
         }
@@ -1011,6 +1055,7 @@ private fun Composer(
 private fun MessageBubble(
     message: ChatMessage,
     isWorking: Boolean,
+    isSearching: Boolean = false,
     autoCollapseThinking: Boolean,
     onRetry: () -> Unit,
     onRegenerate: () -> Unit,
@@ -1088,13 +1133,10 @@ private fun MessageBubble(
                         }
 
                         if (message.status == MessageStatus.SENDING && message.text.isEmpty()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Text("思考中…", style = MaterialTheme.typography.bodyMedium)
+                            if (isSearching) {
+                                WebSearchLoadingIndicator()
+                            } else {
+                                AiThinkingLoadingIndicator()
                             }
                         } else {
                             SelectionContainer {

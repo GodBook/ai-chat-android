@@ -13,6 +13,7 @@ data class TemporaryChatState(
     val images: List<String> = emptyList(),
     val working: Boolean = false,
     val searchEnabled: Boolean = false,
+    val searching: Boolean = false,
 )
 
 /** Deliberately has no database, file, backup or memory-store dependency. */
@@ -33,7 +34,7 @@ class TemporaryChatSession(
         activeRequest = null
         job?.cancel(); job = null
         // Also handles a request cancelled before its coroutine first starts.
-        mutable.update { current -> current.copy(working = false, messages = current.messages.map {
+        mutable.update { current -> current.copy(working = false, searching = false, messages = current.messages.map {
             if (it.requestId == stoppedRequest && it.status in setOf(MessageStatus.SENDING, MessageStatus.STREAMING))
                 it.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止") else it
         }) }
@@ -56,7 +57,7 @@ class TemporaryChatSession(
         activeRequest = requestId
         val user = ChatMessage(UUID.randomUUID().toString(), MessageRole.USER, text.trim(), images, requestId = requestId, conversationId = id)
         val assistant = ChatMessage(UUID.randomUUID().toString(), MessageRole.ASSISTANT, "", status = MessageStatus.SENDING, requestId = requestId, conversationId = id)
-        mutable.value = snapshot.copy(messages = (snapshot.messages + user + assistant).takeLast(40), images = emptyList(), working = true)
+        mutable.value = snapshot.copy(messages = (snapshot.messages + user + assistant).takeLast(40), images = emptyList(), working = true, searching = snapshot.searchEnabled)
         job = scope.launch(Dispatchers.IO) {
             var answer = assistant
             val thinking = StringBuilder()
@@ -67,6 +68,7 @@ class TemporaryChatSession(
                 require(images.isEmpty() || config.visionEnabled) { "请先开启图片支持" }
                 val sources = if (snapshot.searchEnabled) search(user.text, config) else null
                 answer = answer.copy(webSearchResults = sources)
+                mutable.update { if (it.id == id && activeRequest == requestId) it.copy(searching = false) else it }
                 publish()
                 val prompt = if (sources != null) "${user.text}\n\n${buildSearchContext(user.text, sources, Clock.systemDefaultZone())}" else user.text
                 // A single request only. Prior normal or temporary messages never enter the payload.
