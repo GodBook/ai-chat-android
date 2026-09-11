@@ -164,6 +164,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onExportImage = { includeThinking -> viewModel.exportImage(context, includeThinking) },
                     onToggleWebSearch = viewModel::toggleWebSearch,
                     onSwitchBranch = viewModel::switchMessageBranch,
+                    onRenameConversation = viewModel::renameConversation,
                 )
             }
             composable(Routes.SETTINGS) {

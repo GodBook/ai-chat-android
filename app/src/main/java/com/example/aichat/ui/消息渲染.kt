@@ -298,13 +298,33 @@ private fun MarkdownBlock(block: MarkdownBlockModel) {
             fontWeight = FontWeight.SemiBold,
         )
         is MarkdownBlockModel.CodeBlock -> MarkdownCodeBlock(block)
-        is MarkdownBlockModel.Quote -> Column(
-            modifier = Modifier
-                .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            block.blocks.forEach { nested -> MarkdownBlock(nested) }
+        is MarkdownBlockModel.MathBlock -> MarkdownMathBlock(block)
+        is MarkdownBlockModel.Quote -> {
+            val quoteBorderColor = MaterialTheme.colorScheme.primary
+            val quoteBgColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                    .background(quoteBgColor)
+                    .padding(vertical = 4.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(quoteBorderColor, RoundedCornerShape(2.dp)),
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp, top = 2.dp, bottom = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    block.blocks.forEach { nested -> MarkdownBlock(nested) }
+                }
+            }
         }
         is MarkdownBlockModel.ListBlock -> Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             block.items.forEachIndexed { index, item ->
@@ -342,12 +362,20 @@ private fun markdownAnnotatedString(spans: List<MarkdownSpanModel>): AnnotatedSt
     val linkColor = MaterialTheme.colorScheme.primary
     return buildAnnotatedString {
         spans.forEach { span ->
-            val style = SpanStyle(
-                fontWeight = if (span.bold) FontWeight.Bold else null,
-                fontStyle = if (span.italic) FontStyle.Italic else null,
-                fontFamily = if (span.code) FontFamily.Monospace else null,
-                background = if (span.code) codeBackground else Color.Unspecified,
-            )
+            val style = when {
+                span.math -> SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    background = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                )
+                else -> SpanStyle(
+                    fontWeight = if (span.bold) FontWeight.Bold else null,
+                    fontStyle = if (span.italic) FontStyle.Italic else null,
+                    fontFamily = if (span.code) FontFamily.Monospace else null,
+                    background = if (span.code) codeBackground else Color.Unspecified,
+                )
+            }
             val appendStyledText: AnnotatedString.Builder.() -> Unit = {
                 withStyle(style) { append(span.text) }
             }
@@ -366,6 +394,66 @@ private fun markdownAnnotatedString(spans: List<MarkdownSpanModel>): AnnotatedSt
                         ),
                     ),
                     block = appendStyledText,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarkdownMathBlock(block: MarkdownBlockModel.MathBlock) {
+    val clipboard = LocalClipboardManager.current
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            0.5.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                ) {
+                    Text(
+                        text = "∑ 公式",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(block.formula.trim())) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "复制公式",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            SelectionContainer {
+                Text(
+                    text = block.formula.trim(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
         }

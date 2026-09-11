@@ -31,6 +31,7 @@ internal sealed interface MarkdownBlockModel {
     data class Paragraph(val spans: List<MarkdownSpanModel>) : MarkdownBlockModel
     data class Heading(val level: Int, val spans: List<MarkdownSpanModel>) : MarkdownBlockModel
     data class CodeBlock(val code: String, val language: String?) : MarkdownBlockModel
+    data class MathBlock(val formula: String) : MarkdownBlockModel
     data class Quote(val blocks: List<MarkdownBlockModel>) : MarkdownBlockModel
     data class ListBlock(
         val ordered: Boolean,
@@ -47,6 +48,7 @@ internal data class MarkdownSpanModel(
     val bold: Boolean = false,
     val italic: Boolean = false,
     val code: Boolean = false,
+    val math: Boolean = false,
     val linkUrl: String? = null,
 )
 
@@ -69,43 +71,120 @@ internal object MarkdownDocumentParser {
         .extensions(listOf(TablesExtension.create()))
         .build()
 
-    fun parse(markdown: String): List<MarkdownBlockModel> =
-        parser.parse(markdown).children().mapNotNull(::toBlock).toList()
+    private val BLOCK_MATH_REGEX = Regex("""(?s)(?:\$\$|\\\[)([\s\S]+?)(?:\$\$|\\\])""")
+    private val INLINE_MATH_REGEX = Regex("""(?<!\\)\$(?!\s)([^\$\n]+?)(?<!\s)\$|\\\(([\s\S]+?)\\\)""")
+    private val CODE_FENCE_OR_INLINE_REGEX = Regex("""(```[\s\S]*?```|`[^`\n]+`)""")
+    private val DISPLAY_MATH_BRACKETS_REGEX = Regex("""(?s)(?<!\\)\\\[([\s\S]+?)(?<!\\)\\\]""")
+    private val INLINE_MATH_PARENS_REGEX = Regex("""(?<!\\)\\\(([\s\S]+?)(?<!\\)\\\)""")
 
-    private fun toBlock(node: Node): MarkdownBlockModel? = when (node) {
-        is Paragraph -> MarkdownBlockModel.Paragraph(node.inlineSpans())
-        is Heading -> MarkdownBlockModel.Heading(node.level, node.inlineSpans())
-        is FencedCodeBlock -> MarkdownBlockModel.CodeBlock(
-            code = node.literal,
-            language = node.info.trim().takeIf(String::isNotEmpty)?.substringBefore(' '),
-        )
-        is IndentedCodeBlock -> MarkdownBlockModel.CodeBlock(node.literal, null)
-        is BlockQuote -> MarkdownBlockModel.Quote(node.children().mapNotNull(::toBlock).toList())
-        is BulletList -> MarkdownBlockModel.ListBlock(
+    fun parse(markdown: String): List<MarkdownBlockModel> {
+        val preprocessed = preprocessMathDelimiters(markdown)
+        return parser.parse(preprocessed).children().flatMap(::toBlocks).toList()
+    }
+
+    private fun preprocessMathDelimiters(markdown: String): String {
+        if (!markdown.contains("\\[") && !markdown.contains("\\(")) {
+            return markdown
+        }
+        val parts = mutableListOf<String>()
+        var lastIndex = 0
+        for (match in CODE_FENCE_OR_INLINE_REGEX.findAll(markdown)) {
+            if (match.range.first > lastIndex) {
+                parts.add(normalizeMathSyntax(markdown.substring(lastIndex, match.range.first)))
+            }
+            parts.add(match.value)
+            lastIndex = match.range.last + 1
+        }
+        if (lastIndex < markdown.length) {
+            parts.add(normalizeMathSyntax(markdown.substring(lastIndex)))
+        }
+        return parts.joinToString("")
+    }
+
+    private fun normalizeMathSyntax(text: String): String {
+        var result = text
+        result = DISPLAY_MATH_BRACKETS_REGEX.replace(result) { match ->
+            val inner = match.groupValues[1].trim()
+            if (inner.isNotEmpty()) "\n\n$$\n$inner\n$$\n\n" else match.value
+        }
+        result = INLINE_MATH_PARENS_REGEX.replace(result) { match ->
+            val inner = match.groupValues[1].trim()
+            if (inner.isNotEmpty()) "$$inner$" else match.value
+        }
+        return result
+    }
+
+    private fun toBlocks(node: Node): List<MarkdownBlockModel> = when (node) {
+        is Paragraph -> {
+            val spans = node.inlineSpans()
+            val text = spans.joinToString("") { it.text }.trim()
+            val singleBlockMath = Regex("""^(?:\$\$|\\\[)([\s\S]+?)(?:\$\$|\\\])$""").matchEntire(text)
+            if (singleBlockMath != null) {
+                listOf(MarkdownBlockModel.MathBlock(singleBlockMath.groupValues[1].trim()))
+            } else if (BLOCK_MATH_REGEX.containsMatchIn(text) && spans.size == 1) {
+                val result = mutableListOf<MarkdownBlockModel>()
+                var pos = 0
+                for (match in BLOCK_MATH_REGEX.findAll(text)) {
+                    if (match.range.first > pos) {
+                        val before = text.substring(pos, match.range.first).trim()
+                        if (before.isNotEmpty()) {
+                            result.add(MarkdownBlockModel.Paragraph(listOf(MarkdownSpanModel(before))))
+                        }
+                    }
+                    val mathFormula = match.groupValues[1].trim()
+                    if (mathFormula.isNotEmpty()) {
+                        result.add(MarkdownBlockModel.MathBlock(mathFormula))
+                    }
+                    pos = match.range.last + 1
+                }
+                if (pos < text.length) {
+                    val after = text.substring(pos).trim()
+                    if (after.isNotEmpty()) {
+                        result.add(MarkdownBlockModel.Paragraph(listOf(MarkdownSpanModel(after))))
+                    }
+                }
+                result
+            } else {
+                listOf(MarkdownBlockModel.Paragraph(spans))
+            }
+        }
+        is Heading -> listOf(MarkdownBlockModel.Heading(node.level, node.inlineSpans()))
+        is FencedCodeBlock -> {
+            val lang = node.info.trim().takeIf(String::isNotEmpty)?.substringBefore(' ')
+            if (lang?.lowercase() in setOf("latex", "math", "tex")) {
+                listOf(MarkdownBlockModel.MathBlock(node.literal.trim()))
+            } else {
+                listOf(MarkdownBlockModel.CodeBlock(code = node.literal, language = lang))
+            }
+        }
+        is IndentedCodeBlock -> listOf(MarkdownBlockModel.CodeBlock(node.literal, null))
+        is BlockQuote -> listOf(MarkdownBlockModel.Quote(node.children().flatMap(::toBlocks).toList()))
+        is BulletList -> listOf(MarkdownBlockModel.ListBlock(
             ordered = false,
             startNumber = 1,
             items = node.listItems(),
-        )
-        is OrderedList -> MarkdownBlockModel.ListBlock(
+        ))
+        is OrderedList -> listOf(MarkdownBlockModel.ListBlock(
             ordered = true,
             startNumber = node.markerStartNumber ?: 1,
             items = node.listItems(),
-        )
-        is TableBlock -> MarkdownBlockModel.Table(node.tableRows())
-        is ThematicBreak -> MarkdownBlockModel.Divider
-        is HtmlBlock -> MarkdownBlockModel.Paragraph(listOf(MarkdownSpanModel(node.literal)))
-        else -> node.children().mapNotNull(::toBlock).toList().let { children ->
+        ))
+        is TableBlock -> listOf(MarkdownBlockModel.Table(node.tableRows()))
+        is ThematicBreak -> listOf(MarkdownBlockModel.Divider)
+        is HtmlBlock -> listOf(MarkdownBlockModel.Paragraph(listOf(MarkdownSpanModel(node.literal))))
+        else -> {
+            val children = node.children().flatMap(::toBlocks).toList()
             when {
-                children.isNotEmpty() -> MarkdownBlockModel.Quote(children)
-                node.inlineSpans().isNotEmpty() -> MarkdownBlockModel.Paragraph(node.inlineSpans())
-                else -> null
+                children.isNotEmpty() -> listOf(MarkdownBlockModel.Quote(children))
+                node.inlineSpans().isNotEmpty() -> listOf(MarkdownBlockModel.Paragraph(node.inlineSpans()))
+                else -> emptyList()
             }
         }
     }
 
     private fun Node.listItems(): List<List<MarkdownBlockModel>> = children()
         .filterIsInstance<ListItem>()
-        .map { item -> item.children().mapNotNull(::toBlock).toList() }
+        .map { item -> item.children().flatMap(::toBlocks).toList() }
         .toList()
 
     private fun TableBlock.tableRows(): List<MarkdownTableRowModel> = descendants()
@@ -138,7 +217,26 @@ internal object MarkdownDocumentParser {
         output: MutableList<MarkdownSpanModel>,
     ) {
         when (node) {
-            is Text -> output.append(node.literal, style)
+            is Text -> {
+                val text = node.literal
+                var currentIndex = 0
+                val matches = INLINE_MATH_REGEX.findAll(text).toList()
+                if (matches.isEmpty()) {
+                    output.append(text, style)
+                } else {
+                    for (match in matches) {
+                        if (match.range.first > currentIndex) {
+                            output.append(text.substring(currentIndex, match.range.first), style)
+                        }
+                        val mathContent = match.groups[1]?.value ?: match.groups[2]?.value ?: match.value
+                        output.append(mathContent, style.copy(math = true))
+                        currentIndex = match.range.last + 1
+                    }
+                    if (currentIndex < text.length) {
+                        output.append(text.substring(currentIndex), style)
+                    }
+                }
+            }
             is Code -> output.append(node.literal, style.copy(code = true))
             is SoftLineBreak, is HardLineBreak -> output.append("\n", style)
             is StrongEmphasis -> node.children().forEach { collectInline(it, style.copy(bold = true), output) }
@@ -169,6 +267,7 @@ internal object MarkdownDocumentParser {
             bold = style.bold,
             italic = style.italic,
             code = style.code,
+            math = style.math,
             linkUrl = style.linkUrl,
         )
         val previous = lastOrNull()
@@ -206,6 +305,7 @@ internal object MarkdownDocumentParser {
         val bold: Boolean = false,
         val italic: Boolean = false,
         val code: Boolean = false,
+        val math: Boolean = false,
         val linkUrl: String? = null,
     )
 }

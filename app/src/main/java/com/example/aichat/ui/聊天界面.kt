@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -37,6 +38,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -135,10 +137,14 @@ internal fun ChatScreen(
     onExportImage: (Boolean) -> Unit = {},
     onToggleWebSearch: () -> Unit = {},
     onSwitchBranch: (requestId: String, newIndex: Int) -> Unit = { _, _ -> },
+    onRenameConversation: (String, String) -> Unit = { _, _ -> },
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
     var messageToDelete by remember { mutableStateOf<String?>(null) }
+    var messageToEdit by remember { mutableStateOf<ChatMessage?>(null) }
+    var quotedMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var showRenameDialog by rememberSaveable { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showModelMenu by remember { mutableStateOf(false) }
 
@@ -219,17 +225,32 @@ internal fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showRenameDialog = true }
+                            .padding(vertical = 2.dp, horizontal = 4.dp),
+                    ) {
                         AiAvatar(size = 36.dp)
                         Spacer(Modifier.size(10.dp))
                         Column {
-                            Text(
-                                text = state.selectedConversationTitle,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = state.selectedConversationTitle,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "重命名会话",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
                             Box {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -304,6 +325,14 @@ internal fun ChatScreen(
                             onDismissRequest = { showMoreMenu = false },
                         ) {
                             DropdownMenuItem(
+                                text = { Text("重命名会话") },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showRenameDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("生成对话长图 (PNG)") },
                                 leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
                                 onClick = {
@@ -349,12 +378,41 @@ internal fun ChatScreen(
             )
         },
         bottomBar = {
+            val lastUserMessage = remember(state.messages) {
+                state.messages.lastOrNull { it.role == MessageRole.USER }
+            }
+            val handleSend: () -> Unit = {
+                val cleanDraft = draft.trim()
+                val fullText = if (quotedMessage != null) {
+                    val q = quotedMessage!!
+                    val senderLabel = if (q.role == MessageRole.USER) "用户" else "AI"
+                    val quoteLines = q.text.lines().take(5).joinToString("\n> ") { it.take(200) }
+                    "> [引用 $senderLabel]: $quoteLines\n\n$cleanDraft"
+                } else {
+                    cleanDraft
+                }
+                if (fullText.isNotBlank() || state.selectedImagePaths.isNotEmpty()) {
+                    onSend(fullText)
+                    draft = ""
+                    quotedMessage = null
+                }
+            }
+
             Composer(
                 draft = draft,
                 selectedImages = state.selectedImagePaths,
                 isWorking = state.isWorking,
                 webSearchActive = state.webSearchActive,
+                quotedMessage = quotedMessage,
+                lastUserMessage = lastUserMessage,
                 onDraftChange = { draft = it },
+                onCancelQuote = { quotedMessage = null },
+                onEditLastMessage = {
+                    lastUserMessage?.let { lastMsg ->
+                        draft = lastMsg.text
+                        quotedMessage = null
+                    }
+                },
                 onPickImage = {
                     picker.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -362,10 +420,7 @@ internal fun ChatScreen(
                 },
                 onRemoveImage = onRemoveImage,
                 onToggleWebSearch = onToggleWebSearch,
-                onSend = {
-                    onSend(draft)
-                    draft = ""
-                },
+                onSend = handleSend,
                 onStop = onStop,
                 onUsePrompt = { draft = it },
             )
@@ -394,8 +449,11 @@ internal fun ChatScreen(
                             onRetry = { onRetry(message.id) },
                             onRegenerate = { onRegenerate(message.id) },
                             onDelete = { messageToDelete = message.id },
-                            onEditPrompt = { prompt ->
-                                draft = prompt
+                            onEditPrompt = {
+                                messageToEdit = message
+                            },
+                            onQuoteMessage = {
+                                quotedMessage = message
                             },
                             onSwitchBranch = { newIdx ->
                                 message.requestId?.let { reqId ->
@@ -470,6 +528,92 @@ internal fun ChatScreen(
                 ) { Text("删除") }
             },
             dismissButton = { TextButton(onClick = { messageToDelete = null }) { Text("取消") } },
+        )
+    }
+
+    messageToEdit?.let { targetMsg ->
+        var editText by remember(targetMsg.id) { mutableStateOf(targetMsg.text) }
+        AlertDialog(
+            onDismissRequest = { messageToEdit = null },
+            title = { Text("编辑消息") },
+            text = {
+                OutlinedTextField(
+                    value = editText,
+                    onValueChange = { editText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 8,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val textToSend = editText.trim()
+                        if (textToSend.isNotEmpty()) {
+                            messageToEdit = null
+                            onSend(textToSend)
+                        }
+                    },
+                    enabled = editText.isNotBlank(),
+                ) {
+                    Text("作为新消息发送")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { messageToEdit = null }) {
+                        Text("取消")
+                    }
+                    TextButton(
+                        onClick = {
+                            draft = editText
+                            messageToEdit = null
+                        },
+                        enabled = editText.isNotBlank(),
+                    ) {
+                        Text("填入输入框")
+                    }
+                }
+            },
+        )
+    }
+
+    if (showRenameDialog) {
+        val currentTitle = state.selectedConversationTitle
+        var titleInput by rememberSaveable(currentTitle) { mutableStateOf(currentTitle) }
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("重命名会话") },
+            text = {
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    label = { Text("会话标题") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = titleInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            state.selectedConversationId?.let { convId ->
+                                onRenameConversation(convId, trimmed)
+                            }
+                            showRenameDialog = false
+                        }
+                    },
+                    enabled = titleInput.isNotBlank(),
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("取消")
+                }
+            },
         )
     }
 }
@@ -592,7 +736,11 @@ private fun Composer(
     selectedImages: List<String>,
     isWorking: Boolean,
     webSearchActive: Boolean,
+    quotedMessage: ChatMessage?,
+    lastUserMessage: ChatMessage?,
     onDraftChange: (String) -> Unit,
+    onCancelQuote: () -> Unit,
+    onEditLastMessage: () -> Unit,
     onPickImage: () -> Unit,
     onRemoveImage: (String) -> Unit,
     onToggleWebSearch: () -> Unit,
@@ -613,11 +761,17 @@ private fun Composer(
 
     Surface(
         tonalElevation = 3.dp,
-        shadowElevation = 0.dp,
+        shadowElevation = 2.dp,
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.imePadding(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .imePadding(),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
             if (draft.startsWith("/")) {
                 SlashCommandSuggestions(
                     query = draft,
@@ -626,11 +780,70 @@ private fun Composer(
                     },
                 )
             }
+
+            if (quotedMessage != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Reply,
+                            contentDescription = "引用回复",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (quotedMessage.role == MessageRole.USER) "引用 用户 的消息" else "引用 AI 助手的回复",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = quotedMessage.text.lineSequence().firstOrNull()?.take(80) ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(
+                            onClick = onCancelQuote,
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "取消引用",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
             if (draft.isBlank() && selectedImages.isEmpty() && !isWorking) {
                 Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (lastUserMessage != null) {
+                        AssistChip(
+                            onClick = onEditLastMessage,
+                            label = { Text("✏️ 编辑上一条") },
+                        )
+                    }
                     listOf("总结要点", "翻译成中文", "解释得简单一点").forEach { prompt ->
                         AssistChip(
                             onClick = { onUsePrompt(prompt) },
@@ -639,9 +852,13 @@ private fun Composer(
                     }
                 }
             }
+
             if (selectedImages.isNotEmpty()) {
                 Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     selectedImages.forEach { path ->
@@ -667,62 +884,107 @@ private fun Composer(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                IconButton(onClick = onPickImage, enabled = !isWorking) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = "选择图片")
-                }
-                IconButton(
-                    onClick = { showTemplateSheet = true },
-                    enabled = !isWorking,
-                ) {
-                    Icon(
-                        Icons.Default.FlashOn,
-                        contentDescription = "提示词模板",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp),
+
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = {
+                    Text(
+                        "输入消息（输入 / 查看快捷指令）",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                }
-                IconButton(
-                    onClick = onToggleWebSearch,
-                    enabled = !isWorking,
-                    modifier = if (webSearchActive) {
-                        Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                    } else {
-                        Modifier
-                    },
-                ) {
-                    Icon(
-                        Icons.Default.Language,
-                        contentDescription = if (webSearchActive) "已开启联网搜索（点击关闭）" else "已关闭联网搜索（点击开启）",
-                        tint = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("输入消息（输入 / 查看快捷指令）") },
-                    maxLines = 5,
-                    shape = RoundedCornerShape(20.dp),
-                    enabled = !isWorking,
-                    trailingIcon = {
-                        if (draft.isNotBlank()) {
-                            IconButton(onClick = { onDraftChange("") }) {
-                                Icon(Icons.Default.Clear, contentDescription = "清空输入", modifier = Modifier.size(18.dp))
-                            }
+                },
+                minLines = 1,
+                maxLines = 6,
+                shape = RoundedCornerShape(16.dp),
+                enabled = !isWorking,
+                trailingIcon = {
+                    if (draft.isNotBlank()) {
+                        IconButton(onClick = { onDraftChange("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "清空输入", modifier = Modifier.size(18.dp))
                         }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (draft.isNotBlank() || selectedImages.isNotEmpty()) onSend() }),
-                )
+                    }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (draft.isNotBlank() || selectedImages.isNotEmpty()) onSend() }),
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    IconButton(
+                        onClick = onPickImage,
+                        enabled = !isWorking,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.AddPhotoAlternate,
+                            contentDescription = "选择图片",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showTemplateSheet = true },
+                        enabled = !isWorking,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.FlashOn,
+                            contentDescription = "提示词模板",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+
+                    Surface(
+                        onClick = onToggleWebSearch,
+                        enabled = !isWorking,
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (webSearchActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.height(34.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Language,
+                                contentDescription = null,
+                                tint = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                text = if (webSearchActive) "联网开启" else "联网搜索",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (webSearchActive) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
                 FilledIconButton(
                     onClick = if (isWorking) onStop else onSend,
                     enabled = isWorking || draft.isNotBlank() || selectedImages.isNotEmpty(),
+                    modifier = Modifier.size(40.dp),
                 ) {
                     Icon(
-                        if (isWorking) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
+                        imageVector = if (isWorking) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
                         contentDescription = if (isWorking) "停止生成" else "发送",
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
@@ -739,6 +1001,7 @@ private fun MessageBubble(
     onRegenerate: () -> Unit,
     onDelete: () -> Unit,
     onEditPrompt: (String) -> Unit,
+    onQuoteMessage: () -> Unit,
     onSwitchBranch: (Int) -> Unit = {},
 ) {
     val isUser = message.role == MessageRole.USER
@@ -768,73 +1031,93 @@ private fun MessageBubble(
                     bottomStart = 16.dp,
                     bottomEnd = 16.dp,
                 ),
-                border = if (isUser) null else androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                modifier = Modifier.weight(1f, fill = false),
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    // Thinking process card (for DeepSeek Reasoner / R1)
-                    if (!isUser && (!message.thinkingContent.isNullOrBlank() || (message.status == MessageStatus.STREAMING && message.text.isBlank()))) {
-                        ThinkingCard(
-                            thinkingContent = message.thinkingContent.orEmpty(),
-                            isStreaming = message.status == MessageStatus.STREAMING && message.text.isBlank(),
-                            durationMs = message.thinkingDurationMs,
-                            autoCollapse = autoCollapseThinking,
-                        )
-                        if (message.text.isNotBlank() || !message.webSearchResults.isNullOrEmpty()) Spacer(Modifier.height(10.dp))
+                    if (message.imagePaths.isNotEmpty()) {
+                        message.imagePaths.forEach { path ->
+                            AsyncImage(
+                                model = File(path),
+                                contentDescription = "消息附加图片",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.FillWidth,
+                            )
+                        }
                     }
 
-                    // Web search results card
-                    if (!isUser && !message.webSearchResults.isNullOrEmpty()) {
-                        WebSearchResultsCard(results = message.webSearchResults)
-                        if (message.text.isNotBlank()) Spacer(Modifier.height(10.dp))
-                    }
+                    if (isUser) {
+                        SelectionContainer {
+                            MarkdownText(markdown = message.text)
+                        }
+                    } else {
+                        // AI Response Body
+                        if (!message.thinkingContent.isNullOrBlank()) {
+                            ThinkingCard(
+                                thinkingContent = message.thinkingContent,
+                                isStreaming = message.status == MessageStatus.STREAMING && message.text.isEmpty(),
+                                durationMs = message.thinkingDurationMs,
+                                autoCollapse = autoCollapseThinking,
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            )
+                        }
 
-                    message.imagePaths.forEach { path ->
-                        AsyncImage(
-                            model = File(path),
-                            contentDescription = "聊天图片",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(1.25f)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop,
-                        )
-                        if (message.text.isNotBlank()) Spacer(Modifier.height(8.dp))
-                    }
+                        if (!message.webSearchResults.isNullOrEmpty()) {
+                            WebSearchResultsCard(
+                                results = message.webSearchResults,
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            )
+                        }
 
-                    if (message.text.isNotBlank()) {
-                        if (isUser) {
-                            SelectionContainer {
-                                Text(
-                                    message.text,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
+                        if (message.status == MessageStatus.SENDING && message.text.isEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Text("思考中…", style = MaterialTheme.typography.bodyMedium)
                             }
                         } else {
-                            SelectionContainer { MarkdownText(message.text) }
+                            SelectionContainer {
+                                MarkdownText(markdown = message.text)
+                            }
+                            if (message.status == MessageStatus.STREAMING) {
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(12.dp),
+                                        strokeWidth = 1.5.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        "正在生成…",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
-                    } else if (message.status in setOf(MessageStatus.STREAMING, MessageStatus.SENDING) && message.thinkingContent.isNullOrBlank()) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     }
 
-                    // Message Timestamp
-                    if (message.text.isNotBlank() || !message.thinkingContent.isNullOrBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = formatMessageTime(message.createdAt),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isUser) {
-                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            },
-                            fontSize = 10.sp,
-                            modifier = Modifier.align(Alignment.End),
-                        )
-                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = formatMessageTime(message.createdAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isUser) {
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        },
+                        fontSize = 10.sp,
+                        modifier = Modifier.align(Alignment.End),
+                    )
                 }
             }
         }
@@ -847,12 +1130,23 @@ private fun MessageBubble(
                 modifier = Modifier.padding(top = 2.dp, end = 4.dp),
             ) {
                 IconButton(
+                    onClick = onQuoteMessage,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Reply,
+                        contentDescription = "引用",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+                IconButton(
                     onClick = { onEditPrompt(message.text) },
                     modifier = Modifier.size(28.dp),
                 ) {
                     Icon(
                         Icons.Default.Edit,
-                        contentDescription = "编辑重发",
+                        contentDescription = "编辑",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(15.dp),
                     )
@@ -965,6 +1259,11 @@ private fun MessageBubble(
                                 )
                             }
                         }
+                    }
+                    TextButton(onClick = onQuoteMessage) {
+                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(3.dp))
+                        Text("引用", style = MaterialTheme.typography.labelSmall)
                     }
                     TextButton(onClick = onRegenerate, enabled = !isWorking) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))

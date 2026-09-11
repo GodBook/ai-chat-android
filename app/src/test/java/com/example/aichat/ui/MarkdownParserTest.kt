@@ -70,4 +70,44 @@ class MarkdownParserTest {
         assertNull(paragraph.spans.single().linkUrl)
         assertFalse(paragraph.spans.single().code)
     }
+
+    @Test
+    fun `parses block math formulas and inline math formulas`() {
+        val s = "$"
+        val markdown = """
+            这是行内公式：${s}E = mc^2${s} 以及 \(a^2 + b^2 = c^2\)。
+
+            $s$s
+            \int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+            $s$s
+
+            \[
+            f(x) = \sum_{i=1}^n x_i
+            \]
+
+            ```latex
+            \lim_{x \to 0} \frac{\sin x}{x} = 1
+            ```
+        """.trimIndent()
+
+        val blocks = MarkdownDocumentParser.parse(markdown)
+        assertEquals(4, blocks.size)
+
+        // 1. Paragraph with inline math
+        val p = blocks[0] as MarkdownBlockModel.Paragraph
+        assertTrue(p.spans.any { it.text == "E = mc^2" && it.math })
+        assertTrue(p.spans.any { it.text == "a^2 + b^2 = c^2" && it.math })
+
+        // 2. Block math $$...$$
+        val m1 = blocks[1] as MarkdownBlockModel.MathBlock
+        assertTrue(m1.formula.contains("\\int_0^\\infty"))
+
+        // 3. Block math \[...\]
+        val m2 = blocks[2] as MarkdownBlockModel.MathBlock
+        assertTrue(m2.formula.contains("\\sum_{i=1}^n"))
+
+        // 4. Code block with latex language
+        val m3 = blocks[3] as MarkdownBlockModel.MathBlock
+        assertTrue(m3.formula.contains("\\lim_{x \\to 0}"))
+    }
 }
