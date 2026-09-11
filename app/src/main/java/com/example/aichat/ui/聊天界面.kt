@@ -139,11 +139,11 @@ internal fun ChatScreen(
     onSwitchBranch: (requestId: String, newIndex: Int) -> Unit = { _, _ -> },
     onRenameConversation: (String, String) -> Unit = { _, _ -> },
 ) {
-    var draft by rememberSaveable { mutableStateOf("") }
+    var draft by if (state.isTemporary) remember(state.selectedConversationId) { mutableStateOf("") } else rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
-    var messageToDelete by remember { mutableStateOf<String?>(null) }
-    var messageToEdit by remember { mutableStateOf<ChatMessage?>(null) }
-    var quotedMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var messageToDelete by remember(state.selectedConversationId) { mutableStateOf<String?>(null) }
+    var messageToEdit by remember(state.selectedConversationId) { mutableStateOf<ChatMessage?>(null) }
+    var quotedMessage by remember(state.selectedConversationId) { mutableStateOf<ChatMessage?>(null) }
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showModelMenu by remember { mutableStateOf(false) }
@@ -153,9 +153,13 @@ internal fun ChatScreen(
     var shouldFollowTail by remember { mutableStateOf(true) }
     var automaticScrollDepth by remember { mutableIntStateOf(0) }
     val isNearBottom by remember { derivedStateOf { listState.isNearBottom() } }
+    var pickerConversationId by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> uri?.let(onImportImage) }
+    ) { uri ->
+        if (uri != null && (!state.isTemporary || pickerConversationId == state.selectedConversationId)) onImportImage(uri)
+        pickerConversationId = null
+    }
 
     suspend fun scrollToTail(animated: Boolean) {
         automaticScrollDepth += 1
@@ -229,7 +233,7 @@ internal fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { showRenameDialog = true }
+                            .clickable(enabled = !state.isTemporary) { showRenameDialog = true }
                             .padding(vertical = 2.dp, horizontal = 4.dp),
                     ) {
                         AiAvatar(size = 36.dp)
@@ -244,7 +248,7 @@ internal fun ChatScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                 )
                                 Spacer(Modifier.width(4.dp))
-                                Icon(
+                                if (!state.isTemporary) Icon(
                                     Icons.Default.Edit,
                                     contentDescription = "重命名会话",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
@@ -324,6 +328,7 @@ internal fun ChatScreen(
                             expanded = showMoreMenu,
                             onDismissRequest = { showMoreMenu = false },
                         ) {
+                            if (!state.isTemporary) {
                             DropdownMenuItem(
                                 text = { Text("重命名会话") },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
@@ -356,9 +361,10 @@ internal fun ChatScreen(
                                     onExport()
                                 },
                             )
+                            }
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("清空记录", color = MaterialTheme.colorScheme.error) },
+                                text = { Text(if (state.isTemporary) "清空临时内容" else "清空记录", color = MaterialTheme.colorScheme.error) },
                                 leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showMoreMenu = false
@@ -398,6 +404,13 @@ internal fun ChatScreen(
                 }
             }
 
+            Column {
+            if (state.isTemporary) Text(
+                "临时对话 · 不保存历史或记忆，每次提问独立，退出即清除。内容仍会发送给所选模型；开启联网后也会发送给搜索服务。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
             Composer(
                 draft = draft,
                 selectedImages = state.selectedImagePaths,
@@ -414,6 +427,7 @@ internal fun ChatScreen(
                     }
                 },
                 onPickImage = {
+                    pickerConversationId = state.selectedConversationId
                     picker.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                     )
@@ -424,6 +438,7 @@ internal fun ChatScreen(
                 onStop = onStop,
                 onUsePrompt = { draft = it },
             )
+            }
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
@@ -864,7 +879,7 @@ private fun Composer(
                     selectedImages.forEach { path ->
                         Box {
                             AsyncImage(
-                                model = File(path),
+                                model = chatImageModel(path),
                                 contentDescription = "待发送图片",
                                 modifier = Modifier.size(62.dp).clip(RoundedCornerShape(10.dp)),
                                 contentScale = ContentScale.Crop,
@@ -1038,7 +1053,7 @@ private fun MessageBubble(
                     if (message.imagePaths.isNotEmpty()) {
                         message.imagePaths.forEach { path ->
                             AsyncImage(
-                                model = File(path),
+                                model = chatImageModel(path),
                                 contentDescription = "消息附加图片",
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1083,7 +1098,7 @@ private fun MessageBubble(
                             }
                         } else {
                             SelectionContainer {
-                                MarkdownText(markdown = message.text)
+                                MarkdownText(markdown = linkSearchCitations(message.text, message.webSearchResults.orEmpty()))
                             }
                             if (message.status == MessageStatus.STREAMING) {
                                 Spacer(Modifier.height(4.dp))

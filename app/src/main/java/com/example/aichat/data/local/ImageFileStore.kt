@@ -20,6 +20,22 @@ interface ImageStore {
 
 /** Copies selected media into app-private storage so the URI remains usable later. */
 class ImageFileStore(private val context: Context) : ImageStore {
+    /** Decode directly from the selected URI; temporary images never create a private file. */
+    suspend fun importInMemory(uri: Uri): String = withContext(Dispatchers.IO) {
+        val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+        val bitmap = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            val scale = 1600.0 / maxOf(1600, info.size.width, info.size.height)
+            decoder.setTargetSize(maxOf(1, (info.size.width * scale).toInt()), maxOf(1, (info.size.height * scale).toInt()))
+            decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+        try {
+            java.io.ByteArrayOutputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) { "图片处理失败" }
+                "data:image/jpeg;base64," + android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
+            }
+        } finally { bitmap.recycle() }
+    }
+
     suspend fun import(uri: Uri): String = withContext(Dispatchers.IO) {
         val directory = File(context.filesDir, IMAGE_DIRECTORY).apply { mkdirs() }
         val extension = extensionFor(uri)

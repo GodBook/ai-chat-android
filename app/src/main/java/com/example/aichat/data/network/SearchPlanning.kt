@@ -24,37 +24,23 @@ internal fun planSearch(query: String, clock: Clock): SearchPlan {
     val date = explicit ?: relative
     var normalized = text
     if (relative != null) {
-        normalized = normalized.replace(Regex("day after tomorrow|tomorrow|yesterday|today|后天|明天|昨天|今天|今日", RegexOption.IGNORE_CASE), relative.toString())
+        normalized = normalized.replace(Regex("day after tomorrow|tomorrow|yesterday|today|后天|明天|昨天|今天|今日", RegexOption.IGNORE_CASE)) { match ->
+            val offset = when (match.value.lowercase()) {
+                "后天", "day after tomorrow" -> 2L
+                "明天", "tomorrow" -> 1L
+                "昨天", "yesterday" -> -1L
+                else -> 0L
+            }
+            today.plusDays(offset).toString()
+        }
     }
     if (sensitive && date == null) normalized += " ${today.format(DateTimeFormatter.ISO_DATE)}"
     return SearchPlan(normalized, today, sensitive || relative != null, date)
 }
 
-internal fun rankSearchResults(results: List<WebSearchResult>, plan: SearchPlan, maxResults: Int): List<WebSearchResult> {
-    val target = plan.targetDate ?: plan.date
-    val terms = Regex("[a-zA-Z]{3,}|[\\u4e00-\\u9fff]{2,}").findAll(plan.query)
-        .flatMap { match -> if (match.value.any { it in '\u4e00'..'\u9fff' }) match.value.windowed(2).asSequence() else sequenceOf(match.value.lowercase()) }
-        .filterNot { it in setOf("今天", "明天", "后天", "现在", "最新", "怎么", "么样", "如何", "请问", "the", "what", "how", "today", "latest", "current") }.toSet()
-    return results.distinctBy { it.url.substringBefore('#').trimEnd('/') }
-        .mapNotNull { result ->
-            val text = "${result.title} ${result.snippet}"
-            val matches = terms.count { text.contains(it, ignoreCase = true) }
-            if (terms.isNotEmpty() && matches == 0) return@mapNotNull null
-            val dates = Regex("(20\\d{2})[-年/.](\\d{1,2})[-月/.](\\d{1,2})日?").findAll(text).mapNotNull {
-                runCatching { LocalDate.of(it.groupValues[1].toInt(), it.groupValues[2].toInt(), it.groupValues[3].toInt()) }.getOrNull()
-            }.toList() + Regex("(?<![\\d年/-])(\\d{1,2})月\\s*(\\d{1,2})日").findAll(text).mapNotNull {
-                runCatching { LocalDate.of(target.year, it.groupValues[1].toInt(), it.groupValues[2].toInt()) }.getOrNull()
-            }.toList()
-            val oldest = if (plan.targetDate != null) target else target.minusDays(7)
-            if (plan.timeSensitive && dates.isNotEmpty() && dates.none { !it.isBefore(oldest) && !it.isAfter(target.plusDays(1)) }) return@mapNotNull null
-            val score = matches * 3 + (if (target in dates) 10 else 0) + (if (result.snippet.isNotBlank()) 2 else 0)
-            result to score
-        }.sortedByDescending { it.second }.map { it.first }.take(maxResults.coerceAtLeast(0))
-}
-
 internal fun buildSearchContext(query: String, results: List<WebSearchResult>, clock: Clock): String {
     val sources = results.mapIndexed { i, r ->
-        "[来源 ${i + 1}] ${r.title}\n网址: ${r.url}\n内容: ${r.snippet.take(5000)}"
+        "[来源 ${i + 1}] ${r.title}\n网址: ${r.url}\n发布信息: ${r.publishedAt ?: "来源未提供"}\n引用摘录: ${r.snippet.take(5000).ifBlank { "未提供摘录，仅可确认标题和网址，不得推断正文内容" }}"
     }.joinToString("\n\n")
     return """
         检索时间: ${java.time.ZonedDateTime.now(clock)}；用户问题: $query

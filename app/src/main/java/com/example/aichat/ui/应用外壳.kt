@@ -18,6 +18,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -31,6 +33,7 @@ private object Routes {
     const val CONTACTS = "contacts"
     const val CHAT = "chat"
     const val SETTINGS = "settings"
+    const val TEMPORARY = "temporary"
 }
 
 internal const val STREAM_SCROLL_DEBOUNCE_MS = 120L
@@ -136,6 +139,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onToggleGroupCollapsed = viewModel::toggleGroupCollapsed,
                     onTogglePinConversation = viewModel::togglePinConversation,
                     onSetConversationIcon = viewModel::setConversationIcon,
+                    onTemporaryConversation = { viewModel.startTemporaryConversation { navController.navigate(Routes.TEMPORARY) } },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 )
             }
@@ -167,6 +171,33 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onSwitchBranch = viewModel::switchMessageBranch,
                     onRenameConversation = viewModel::renameConversation,
                 )
+            }
+            composable(Routes.TEMPORARY) {
+                val exit = {
+                    viewModel.closeTemporaryConversation()
+                    navController.popBackStack()
+                    Unit
+                }
+                BackHandler(onBack = exit)
+                DisposableEffect(Unit) {
+                    val window = (context as? Activity)?.window
+                    val wasSecure = (window?.attributes?.flags ?: 0).and(android.view.WindowManager.LayoutParams.FLAG_SECURE) != 0
+                    window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                    onDispose {
+                        viewModel.closeTemporaryConversation()
+                        if (!wasSecure) window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                }
+                if (state.isTemporary) ChatScreen(
+                    state = state, onBack = exit,
+                    onOpenSettings = { exit(); navController.navigate(Routes.SETTINGS) },
+                    onImportImage = { viewModel.importTemporaryImage(it, state.selectedConversationId) }, onRemoveImage = viewModel::removeSelectedImage,
+                    onSend = viewModel::send, onStop = viewModel::stop, onRetry = viewModel::retry,
+                    onRegenerate = viewModel::regenerate, onDeleteMessage = viewModel::deleteMessage,
+                    onClear = viewModel::clearConversation, onDraftRestored = {},
+                    onSelectModelPreset = viewModel::switchModelPreset, onExport = {},
+                    onToggleWebSearch = viewModel::toggleWebSearch,
+                ) else LaunchedEffect(Unit) { if (!viewModel.hasTemporaryConversation()) navController.popBackStack(Routes.CONTACTS, false) }
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(

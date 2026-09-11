@@ -13,9 +13,10 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Encrypts the API key with an AES-GCM key held by Android Keystore. */
-class ApiKeyStore(context: Context) {
+class ApiKeyStore(context: Context, namespace: String = "") {
+    private val keyAlias = if (namespace.isBlank()) KEY_ALIAS else "${KEY_ALIAS}_$namespace"
     private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
+        if (namespace.isBlank()) PREFERENCES_NAME else "${PREFERENCES_NAME}_$namespace",
         Context.MODE_PRIVATE,
     )
 
@@ -61,12 +62,12 @@ class ApiKeyStore(context: Context) {
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (keyStore.getKey(keyAlias, null) as? SecretKey)?.let { return it }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
         generator.init(
             KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
+                keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)

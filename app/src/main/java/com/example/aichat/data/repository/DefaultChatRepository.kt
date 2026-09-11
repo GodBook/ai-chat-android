@@ -126,7 +126,7 @@ class DefaultChatRepository(
         }
 
         val searchResults = if (webSearch && cleanText.isNotEmpty()) {
-            searchForConversation(selectedConversationId, cleanText, dao.getForConversation(selectedConversationId).lastOrNull { it.role == MessageRole.USER.name }?.text)
+            searchForConversation(selectedConversationId, config, cleanText, dao.getForConversation(selectedConversationId).lastOrNull { it.role == MessageRole.USER.name }?.text)
         } else null
 
         val requestId = UUID.randomUUID().toString()
@@ -227,7 +227,7 @@ class DefaultChatRepository(
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
         val refreshedResults = if (target.webSearchResults != null) {
-            searchForConversation(selectedConversationId, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+            searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
         } else null
         val userRequestMessage = if (refreshedResults != null) {
             val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
@@ -283,7 +283,7 @@ class DefaultChatRepository(
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
         val refreshedResults = if (target.webSearchResults != null) {
-            searchForConversation(selectedConversationId, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+            searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
         } else null
         val userRequestMessage = if (refreshedResults != null) {
             val searchContext = buildWebSearchPrompt(user.text, refreshedResults)
@@ -666,8 +666,8 @@ class DefaultChatRepository(
 
     private fun normalizeTitle(value: String): String = value.trim().ifEmpty { "新聊天" }
 
-    private suspend fun searchForConversation(id: String, query: String, previousQuery: String?): List<com.example.aichat.data.network.WebSearchResult> = coroutineScope {
-        val child = async(Dispatchers.IO, start = CoroutineStart.LAZY) { webSearchClient.search(query, previousQuery = previousQuery) }
+    private suspend fun searchForConversation(id: String, config: ProviderConfig, query: String, previousQuery: String?): List<com.example.aichat.data.network.WebSearchResult> = coroutineScope {
+        val child = async(Dispatchers.IO, start = CoroutineStart.LAZY) { webSearchClient.search(query, config, previousQuery = previousQuery) }
         synchronized(activeRequestLock) { searchJob = child; searchingConversation.value = id }
         try {
             child.start()

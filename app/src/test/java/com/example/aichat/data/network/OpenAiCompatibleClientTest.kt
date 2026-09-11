@@ -23,6 +23,25 @@ import java.util.concurrent.TimeUnit
 
 class OpenAiCompatibleClientTest {
     @Test
+    fun `temporary data URI images are transmitted without accessing image files`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: [DONE]\n\n"))
+            val client = OpenAiCompatibleClient(
+                imageFileStore = object : ImageStore { override fun mimeType(path: String): String = error("Temporary image must not access files") },
+                allowInsecureHttp = true,
+            )
+            val data = "data:image/png;base64,AQID"
+            client.streamChat(
+                ProviderConfig(baseUrl = server.url("/v1").toString(), model = "vision", apiKey = "test", visionEnabled = true),
+                listOf(ChatRequestMessage(MessageRole.USER, "private image", listOf(data))),
+            ).toList()
+            val body = server.takeRequest().body.readUtf8()
+            assertTrue(body.contains("\"url\":\"$data\""))
+            assertTrue(body.contains("private image"))
+        }
+    }
+
+    @Test
     fun `stream request serializes OpenAI messages and emits deltas`() = runBlocking {
         val server = MockWebServer()
         server.enqueue(

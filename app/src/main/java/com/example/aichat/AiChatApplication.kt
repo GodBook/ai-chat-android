@@ -30,7 +30,9 @@ class AppContainer(application: Application) {
     val configStore = ConfigStore(application)
     val apiKeyStore = ApiKeyStore(application)
     val imageFileStore = ImageFileStore(application)
-    private val client = OpenAiCompatibleClient(imageFileStore)
+    val client = OpenAiCompatibleClient(imageFileStore)
+    val webSearchSettingsStore = com.example.aichat.data.local.WebSearchSettingsStore(application)
+    val webSearchClient = com.example.aichat.data.network.WebSearchClient(resolveConfig = webSearchSettingsStore::resolve)
     val updateConfigStore = UpdateConfigStore(application)
     val updateManager = AppUpdateManager(
         context = application,
@@ -42,5 +44,6 @@ class AppContainer(application: Application) {
         apiKeyStore = apiKeyStore,
         imageFileStore = imageFileStore,
         client = client,
+        webSearchClient = webSearchClient,
     )
 }

@@ -23,9 +23,10 @@ class Version168UiTest {
 
     @Test fun historyShowsCurrentAndOldestBundledVersionsOffline() {
         compose.setContent { MaterialTheme { ReleaseHistoryDialog({}) } }
-        compose.waitUntil(15000) { compose.onAllNodesWithText("v1.6.8 · 当前版本").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("v1.6.8 · 当前版本").assertIsDisplayed()
-        compose.onNodeWithText("v1.6.8 · 当前版本").performClick()
+        val current = "v${com.example.aichat.BuildConfig.VERSION_NAME} · 当前版本"
+        compose.waitUntil(15000) { compose.onAllNodesWithText(current).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(current).assertIsDisplayed()
+        compose.onNodeWithText(current).performClick()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("v1.1"))
         compose.onNodeWithText("v1.1").assertIsDisplayed().performClick()
         compose.onNodeWithText("联网刷新").assertExists()

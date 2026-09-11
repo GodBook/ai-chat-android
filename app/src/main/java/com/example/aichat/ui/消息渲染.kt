@@ -60,7 +60,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import com.example.aichat.data.network.WebSearchResult
 import java.text.SimpleDateFormat
@@ -162,7 +161,7 @@ internal fun WebSearchResultsCard(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val uriHandler = LocalUriHandler.current
+    val sourceContext = androidx.compose.ui.platform.LocalContext.current
 
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -220,7 +219,7 @@ internal fun WebSearchResultsCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    runCatching { uriHandler.openUri(item.url) }
+                                    openSearchSource(sourceContext, item.url)
                                 },
                         ) {
                             Column(modifier = Modifier.padding(8.dp)) {
@@ -261,6 +260,16 @@ internal fun WebSearchResultsCard(
                                         maxLines = 3,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                }
+                                Text(
+                                    text = item.url + (item.publishedAt?.let { "\n发布信息：$it" } ?: ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 3, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                                androidx.compose.material3.TextButton(onClick = { openSearchSource(sourceContext, item.url) }) {
+                                    Text("查看来源 ${index + 1} ↗")
                                 }
                             }
                         }
@@ -358,6 +367,7 @@ private fun MarkdownInlineText(spans: List<MarkdownSpanModel>) {
 
 @Composable
 private fun markdownAnnotatedString(spans: List<MarkdownSpanModel>): AnnotatedString {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
     val linkColor = MaterialTheme.colorScheme.primary
     return buildAnnotatedString {
@@ -386,6 +396,7 @@ private fun markdownAnnotatedString(spans: List<MarkdownSpanModel>): AnnotatedSt
                 withLink(
                     LinkAnnotation.Url(
                         url = link,
+                        linkInteractionListener = { openSearchSource(context, link) },
                         styles = TextLinkStyles(
                             style = SpanStyle(
                                 color = linkColor,

@@ -988,6 +988,8 @@ internal fun SettingsScreen(
                 }
             }
 
+            WebSearchSettingsCard()
+
             // 3. 后台截屏助手卡片
             SettingsCard {
                 SettingsCardHeader(

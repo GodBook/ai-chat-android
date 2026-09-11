@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
@@ -129,6 +130,7 @@ internal fun ContactsScreen(
     onToggleGroupCollapsed: (String) -> Unit = {},
     onTogglePinConversation: (String) -> Unit = {},
     onSetConversationIcon: (String, String?) -> Unit = { _, _ -> },
+    onTemporaryConversation: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
@@ -218,6 +220,9 @@ internal fun ContactsScreen(
                                 }) {
                                     Icon(Icons.Default.Checklist, contentDescription = "批量管理")
                                 }
+                            }
+                            IconButton(onClick = onTemporaryConversation, enabled = !isAnyWorking) {
+                                Icon(Icons.Default.VisibilityOff, contentDescription = "开启临时对话")
                             }
                             NewChatActionButton(
                                 enabled = !isAnyWorking,

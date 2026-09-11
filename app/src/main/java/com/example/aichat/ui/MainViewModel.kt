@@ -109,6 +109,7 @@ data class MainUiState(
     val probeState: ProbeUiState = ProbeUiState.Idle,
     val backupRestoreState: BackupRestoreUiState = BackupRestoreUiState.Idle,
     val webSearchActive: Boolean = false,
+    val isTemporary: Boolean = false,
 )
 
 private data class ConversationSnapshot(
@@ -144,7 +145,11 @@ class MainViewModel(
     private val imageFileStore: ImageFileStore,
     private val updateConfigStore: UpdateConfigStore,
     private val updateManager: AppUpdateManager,
+    private val client: com.example.aichat.data.network.OpenAiCompatibleClient,
+    private val webSearchClient: com.example.aichat.data.network.WebSearchClient,
 ) : ViewModel() {
+    private val temporary = com.example.aichat.data.repository.TemporaryChatSession(viewModelScope, client::streamChat) { query, config -> webSearchClient.search(query, config) }
+    private var temporaryPreparation: kotlinx.coroutines.Job? = null
     private val selectedConversationId = MutableStateFlow<String?>(null)
     private val selectedImagePaths = MutableStateFlow<List<String>>(emptyList())
     private val transientMessage = MutableStateFlow<String?>(null)
@@ -251,6 +256,13 @@ class MainViewModel(
         )
     }.combine(backupRestoreState) { state, backup ->
         state.copy(backupRestoreState = backup)
+    }.combine(temporary.state) { state, temp ->
+        if (temp.id == null) state else state.copy(
+            isTemporary = true, selectedConversationId = temp.id, selectedConversationTitle = "临时对话",
+            messages = temp.messages, selectedImagePaths = temp.images, isWorking = temp.working,
+            isAnyWorking = state.isAnyWorking || temp.working, webSearchActive = temp.searchEnabled,
+            draftToRestore = null,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     init {
@@ -562,6 +574,14 @@ class MainViewModel(
     }
 
     fun importImage(uri: Uri) {
+        temporary.state.value.id?.let { id ->
+            viewModelScope.launch {
+                try { temporary.addImage(id, imageFileStore.importInMemory(uri)) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { if (temporary.state.value.id == id) transientMessage.value = "无法读取所选图片" }
+            }
+            return
+        }
         val conversationId = selectedConversationId.value
         val generation = conversationGeneration.get()
         viewModelScope.launch {
@@ -581,16 +601,22 @@ class MainViewModel(
     }
 
     fun removeSelectedImage(path: String) {
+        if (temporary.state.value.id != null) { temporary.removeImage(path); return }
         selectedImagePaths.value = selectedImagePaths.value - path
         deleteComposerImages(listOf(path))
     }
 
     fun toggleWebSearch(active: Boolean? = null) {
+        if (temporary.state.value.id != null) { temporary.toggleSearch(); return }
         val current = uiState.value.webSearchActive
         webSearchActive.value = active ?: !current
     }
 
     fun send(text: String) {
+        if (temporary.state.value.id != null) {
+            prepareTemporaryRequest { config -> temporary.send(text, config) }
+            return
+        }
         if (uiState.value.isWorking) return
         val images = selectedImagePaths.value
         if (text.isBlank() && images.isEmpty()) {
@@ -626,9 +652,41 @@ class MainViewModel(
         }
     }
 
-    fun stop() = repository.stopGeneration()
+    fun stop() {
+        if (temporary.state.value.id != null) { temporaryPreparation?.cancel(); temporary.stop() }
+        else repository.stopGeneration()
+    }
+
+    fun startTemporaryConversation(onReady: () -> Unit) {
+        if (uiState.value.isAnyWorking) { transientMessage.value = "请先停止正在生成的回复"; return }
+        transientMessage.value = null
+        temporaryPreparation?.cancel()
+        temporary.start()
+        onReady()
+    }
+
+    fun closeTemporaryConversation() { temporaryPreparation?.cancel(); temporary.close(); transientMessage.value = null }
+    fun hasTemporaryConversation(): Boolean = temporary.state.value.id != null
+    fun importTemporaryImage(uri: Uri, sessionId: String?) {
+        if (sessionId != null && temporary.state.value.id == sessionId) importImage(uri)
+    }
+
+    private fun prepareTemporaryRequest(action: (ProviderConfig) -> Unit) {
+        val id = temporary.state.value.id ?: return
+        if (temporary.state.value.working || temporaryPreparation?.isActive == true) return
+        temporaryPreparation = viewModelScope.launch {
+            try {
+                val config = configStore.read().copy(apiKey = apiKeyStore.read())
+                if (temporary.state.value.id == id) action(config)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { if (temporary.state.value.id == id) transientMessage.value = "临时对话请求失败，请检查设置后重试" }
+        }
+    }
+
+    private fun retryTemporary(messageId: String) = prepareTemporaryRequest { temporary.retry(messageId, it) }
 
     fun retry(messageId: String) {
+        if (temporary.state.value.id != null) { retryTemporary(messageId); return }
         val conversationId = selectedConversationId.value ?: return
         viewModelScope.launch {
             try {
@@ -646,6 +704,7 @@ class MainViewModel(
     }
 
     fun regenerate(messageId: String) {
+        if (temporary.state.value.id != null) { retryTemporary(messageId); return }
         val conversationId = selectedConversationId.value ?: return
         if (uiState.value.isWorking) {
             transientMessage.value = "请先停止正在生成的回复"
@@ -667,6 +726,7 @@ class MainViewModel(
     }
 
     fun deleteMessage(messageId: String) {
+        if (temporary.state.value.id != null) { temporary.deleteMessage(messageId); return }
         viewModelScope.launch {
             try {
                 val targetReqId = uiState.value.messages.firstOrNull { it.id == messageId }?.requestId
@@ -695,6 +755,7 @@ class MainViewModel(
     }
 
     fun clearConversation() {
+        if (temporary.state.value.id != null) { temporaryPreparation?.cancel(); temporary.clear(); return }
         val conversationId = selectedConversationId.value ?: return
         val generation = conversationGeneration.incrementAndGet()
         val draftImages = selectedImagePaths.value
@@ -1015,6 +1076,7 @@ class MainViewModel(
     }
 
     fun exportMarkdown(context: Context) {
+        if (temporary.state.value.id != null) return
         viewModelScope.launch {
             val state = uiState.value
             val convTitle = state.selectedConversationTitle
@@ -1033,6 +1095,7 @@ class MainViewModel(
     }
 
     fun exportImage(context: Context, includeThinking: Boolean = true) {
+        if (temporary.state.value.id != null) return
         viewModelScope.launch {
             val state = uiState.value
             val convTitle = state.selectedConversationTitle
@@ -1068,6 +1131,8 @@ class MainViewModelFactory(private val container: AppContainer) : ViewModelProvi
             imageFileStore = container.imageFileStore,
             updateConfigStore = container.updateConfigStore,
             updateManager = container.updateManager,
+            client = container.client,
+            webSearchClient = container.webSearchClient,
         ) as T
     }
 }

@@ -432,6 +432,13 @@ private class ChatCompletionsRequestBody(
                 }
                 message.imagePaths.forEach { path ->
                     if (contentIndex++ > 0) sink.writeByte(','.code)
+                    if (path.startsWith("data:image/")) {
+                        require(path.length <= 8_000_000 && Regex("data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+").matches(path)) { "内存图片格式无效" }
+                        sink.writeUtf8("{\"type\":\"image_url\",\"image_url\":{\"url\":")
+                        sink.writeUtf8(jsonQuote(path))
+                        sink.writeUtf8("}}")
+                        return@forEach
+                    }
                     val mime = imageFileStore.mimeType(path)
                     sink.writeUtf8("{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:$mime;base64,")
                     // The Base64 payload is streamed from the private image file in small chunks.
