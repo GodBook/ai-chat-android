@@ -57,6 +57,15 @@ interface ChatConversationDao {
     @Query("DELETE FROM chat_conversations WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>): Int
 
+    @Query("UPDATE chat_conversations SET personaId = :personaId, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setPersona(id: String, personaId: String?, updatedAt: Long): Int
+
+    @Query("UPDATE chat_conversations SET providerProfileId = :providerProfileId, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setProviderProfile(id: String, providerProfileId: String?, updatedAt: Long): Int
+
+    @Query("UPDATE chat_conversations SET contextWindowLimit = :limit, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setContextWindowLimit(id: String, limit: Int, updatedAt: Long): Int
+
     @Query("SELECT COUNT(*) FROM chat_conversations")
     suspend fun count(): Int
 }

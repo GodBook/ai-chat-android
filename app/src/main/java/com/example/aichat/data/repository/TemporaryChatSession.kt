@@ -76,8 +76,10 @@ class TemporaryChatSession(
                     when (event) {
                         is ChatStreamEvent.Delta -> content.append(event.text)
                         is ChatStreamEvent.ThinkingDelta -> thinking.append(event.text)
+                        is ChatStreamEvent.Usage -> Unit
                         ChatStreamEvent.Done -> Unit
                     }
+
                     answer = answer.copy(text = content.toString(), thinkingContent = thinking.toString().ifBlank { null }, status = MessageStatus.STREAMING)
                     publish()
                 }

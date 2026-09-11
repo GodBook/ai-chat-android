@@ -30,14 +30,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.NetworkCheck
@@ -48,6 +53,12 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Slider
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.example.aichat.data.model.ChatPersona
+import com.example.aichat.data.model.ProviderProfile
+import com.example.aichat.data.model.ProviderType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -76,6 +87,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -458,7 +470,19 @@ internal fun SettingsScreen(
     onExportBackup: (android.net.Uri) -> Unit = {},
     onImportBackup: (android.net.Uri) -> Unit = {},
     onResetBackupRestoreState: () -> Unit = {},
+    onSavePersona: (ChatPersona) -> Unit = {},
+    onDeletePersona: (String) -> Unit = {},
+    onSaveProfile: (ProviderProfile, String?) -> Unit = { _, _ -> },
+    onDeleteProfile: (String) -> Unit = {},
 ) {
+    var editingPersona by remember { mutableStateOf<ChatPersona?>(null) }
+    var isNewPersona by remember { mutableStateOf(false) }
+    var personaToDelete by remember { mutableStateOf<ChatPersona?>(null) }
+    var editingProfile by remember { mutableStateOf<ProviderProfile?>(null) }
+    var isNewProfile by remember { mutableStateOf(false) }
+    var editingProfileApiKey by remember { mutableStateOf("") }
+    var profileToDelete by remember { mutableStateOf<ProviderProfile?>(null) }
+
     var baseUrl by rememberSaveable(state.config.baseUrl) { mutableStateOf(state.config.baseUrl) }
     var model by rememberSaveable(state.config.model) { mutableStateOf(state.config.model) }
     var apiKey by rememberSaveable { mutableStateOf("") }
@@ -874,7 +898,272 @@ internal fun SettingsScreen(
                 }
             }
 
-            // 2. 主题颜色卡片
+            // 2. 多服务商预设 Hub 卡片
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.CloudQueue,
+                    title = "服务商预设 Hub",
+                    subtitle = "管理多个服务商预设，针对不同厂商配置专属端点与加密 Key",
+                )
+                Text(
+                    "可以在会话中随时切换不同服务商预设；支持 DeepSeek、OpenAI、月之暗面、通义千问、硅基流动与自定义接口。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    for (profile in state.providerProfiles) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = profile.name,
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                                        ) {
+                                            Text(
+                                                text = profile.presetLabel,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                        if (profile.isCustom) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
+                                            ) {
+                                                Text(
+                                                    text = "自定义",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "${profile.defaultModel} · ${profile.baseUrl.removePrefix("https://").removePrefix("http://")}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = {
+                                            editingProfile = profile
+                                            isNewProfile = false
+                                            editingProfileApiKey = ""
+                                        },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = "编辑",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    if (profile.isCustom) {
+                                        IconButton(
+                                            onClick = { profileToDelete = profile },
+                                            modifier = Modifier.size(32.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "删除",
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        editingProfile = ProviderProfile(
+                            id = "profile_custom_${System.currentTimeMillis()}",
+                            name = "自定义预设",
+                            baseUrl = "https://api.openai.com/v1",
+                            defaultModel = "gpt-4o-mini",
+                            presetType = "custom",
+                        )
+                        isNewProfile = true
+                        editingProfileApiKey = ""
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("添加自定义服务商预设")
+                }
+            }
+
+            // 3. 角色面具库卡片
+            SettingsCard {
+                SettingsCardHeader(
+                    icon = Icons.Default.Face,
+                    title = "角色面具库",
+                    subtitle = "管理 AI 专属人设、系统提示词与创造力参数",
+                )
+                Text(
+                    "内置 12 款精选角色（编程、写作、翻译、学术等），支持无限制创建自定义人设并绑定到任意会话。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    for (persona in state.personas) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(persona.avatar, style = MaterialTheme.typography.headlineSmall)
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = persona.name,
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
+                                        ) {
+                                            Text(
+                                                text = persona.category,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                        if (persona.isCustom) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
+                                            ) {
+                                                Text(
+                                                    text = "自定义",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = "🌡️ ${persona.temperature}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = persona.description.ifBlank { persona.systemPrompt.take(60) },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = {
+                                            editingPersona = persona
+                                            isNewPersona = false
+                                        },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = "编辑",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    if (persona.isCustom) {
+                                        IconButton(
+                                            onClick = { personaToDelete = persona },
+                                            modifier = Modifier.size(32.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "删除",
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        editingPersona = ChatPersona(
+                            id = "persona_custom_${System.currentTimeMillis()}",
+                            name = "新面具",
+                            avatar = "🎭",
+                            systemPrompt = "你是一个专业的人工智能助手。",
+                            temperature = 0.7f,
+                            description = "自定义人设",
+                            category = "自定义",
+                            isBuiltIn = false,
+                        )
+                        isNewPersona = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("新建自定义角色面具")
+                }
+            }
+
+            // 4. 主题颜色卡片
             SettingsCard {
                 SettingsCardHeader(
                     icon = Icons.Default.Palette,
@@ -1658,6 +1947,263 @@ internal fun SettingsScreen(
             confirmButton = { TextButton(onClick = { installError = null }) { Text("知道了") } },
         )
     }
+
+    editingPersona?.let { p ->
+        var name by remember(p.id) { mutableStateOf(p.name) }
+        var avatar by remember(p.id) { mutableStateOf(p.avatar) }
+        var category by remember(p.id) { mutableStateOf(p.category) }
+        var prompt by remember(p.id) { mutableStateOf(p.systemPrompt) }
+        var description by remember(p.id) { mutableStateOf(p.description) }
+        var temperature by remember(p.id) { mutableFloatStateOf(p.temperature) }
+
+        AlertDialog(
+            onDismissRequest = { editingPersona = null },
+            title = { Text(if (isNewPersona) "新建角色面具" else "编辑角色面具") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = avatar,
+                            onValueChange = { avatar = it },
+                            label = { Text("图标/Emoji") },
+                            modifier = Modifier.width(90.dp),
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("面具名称") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = category,
+                        onValueChange = { category = it },
+                        label = { Text("分类") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("简短描述") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Column {
+                        Text(
+                            text = "创造力温度 (Temperature): ${String.format(Locale.US, "%.2f", temperature)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Slider(
+                            value = temperature,
+                            onValueChange = { temperature = it },
+                            valueRange = 0f..2f,
+                            steps = 19,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        label = { Text("系统提示词 (System Prompt)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 4,
+                        maxLines = 10,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmedName = name.trim()
+                        if (trimmedName.isNotBlank() && prompt.isNotBlank()) {
+                            onSavePersona(
+                                p.copy(
+                                    name = trimmedName,
+                                    avatar = avatar.trim().ifBlank { "🎭" },
+                                    category = category.trim().ifBlank { "自定义" },
+                                    description = description.trim(),
+                                    systemPrompt = prompt.trim(),
+                                    temperature = (temperature * 100).toInt() / 100f,
+                                    isBuiltIn = false,
+                                )
+                            )
+                            editingPersona = null
+                        }
+                    },
+                    enabled = name.isNotBlank() && prompt.isNotBlank(),
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingPersona = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
+    personaToDelete?.let { p ->
+        AlertDialog(
+            onDismissRequest = { personaToDelete = null },
+            title = { Text("删除角色面具？") },
+            text = { Text("确定要删除面具「${p.name}」吗？已绑定此面具的会话将自动恢复为默认助手。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePersona(p.id)
+                        personaToDelete = null
+                    },
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { personaToDelete = null }) { Text("取消") } },
+        )
+    }
+
+    editingProfile?.let { prof ->
+        var name by remember(prof.id) { mutableStateOf(prof.name) }
+        var providerType by remember(prof.id) { mutableStateOf(prof.providerType) }
+        var baseUrlInput by remember(prof.id) { mutableStateOf(prof.baseUrl) }
+        var modelInput by remember(prof.id) { mutableStateOf(prof.defaultModel) }
+        var profileApiKey by remember(prof.id) { mutableStateOf(editingProfileApiKey) }
+        var showProfileApiKey by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { editingProfile = null },
+            title = { Text(if (isNewProfile) "新建服务商预设" else "编辑服务商预设") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("预设名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Text("服务商类型", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        for (pType in ProviderType.entries) {
+                            FilterChip(
+                                selected = providerType == pType,
+                                onClick = {
+                                    providerType = pType
+                                    if (pType == ProviderType.DEEPSEEK) {
+                                        baseUrlInput = "https://api.deepseek.com/v1"
+                                        modelInput = "deepseek-chat"
+                                    } else if (pType == ProviderType.OPENAI) {
+                                        baseUrlInput = "https://api.openai.com/v1"
+                                        modelInput = "gpt-4o-mini"
+                                    } else if (pType == ProviderType.MOONSHOT) {
+                                        baseUrlInput = "https://api.moonshot.cn/v1"
+                                        modelInput = "moonshot-v1-8k"
+                                    } else if (pType == ProviderType.QWEN) {
+                                        baseUrlInput = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                                        modelInput = "qwen-plus"
+                                    } else if (pType == ProviderType.SILICONFLOW) {
+                                        baseUrlInput = "https://api.siliconflow.cn/v1"
+                                        modelInput = "deepseek-ai/DeepSeek-V3"
+                                    }
+                                },
+                                label = { Text(pType.label) },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = baseUrlInput,
+                        onValueChange = { baseUrlInput = it },
+                        label = { Text("接口地址 (Base URL)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = modelInput,
+                        onValueChange = { modelInput = it },
+                        label = { Text("模型名称 (Model)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = profileApiKey,
+                        onValueChange = { profileApiKey = it },
+                        label = { Text("独立 API Key (可选)") },
+                        supportingText = { Text("留空则使用全局设置中的 API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = if (showProfileApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showProfileApiKey = !showProfileApiKey }) {
+                                Icon(
+                                    if (showProfileApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null,
+                                )
+                            }
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmedName = name.trim()
+                        val trimmedUrl = baseUrlInput.trim()
+                        val trimmedModel = modelInput.trim()
+                        if (trimmedName.isNotBlank() && trimmedUrl.isNotBlank() && trimmedModel.isNotBlank()) {
+                            onSaveProfile(
+                                prof.copy(
+                                    name = trimmedName,
+                                    presetType = providerType.key,
+                                    baseUrl = trimmedUrl,
+                                    defaultModel = trimmedModel,
+                                ),
+                                profileApiKey.trim().takeIf { it.isNotBlank() },
+                            )
+                            editingProfile = null
+                        }
+                    },
+                    enabled = name.isNotBlank() && baseUrlInput.isNotBlank() && modelInput.isNotBlank(),
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingProfile = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
+    profileToDelete?.let { prof ->
+        AlertDialog(
+            onDismissRequest = { profileToDelete = null },
+            title = { Text("删除服务商预设？") },
+            text = { Text("确定要删除预设「${prof.name}」吗？已绑定此预设的会话将自动回退为全局默认配置。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteProfile(prof.id)
+                        profileToDelete = null
+                    },
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { profileToDelete = null }) { Text("取消") } },
+        )
+    }
+
     if (showDeleteKeyConfirmation) {
         AlertDialog(
             onDismissRequest = { showDeleteKeyConfirmation = false },

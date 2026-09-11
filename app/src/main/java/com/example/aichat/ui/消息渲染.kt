@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,9 +30,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -659,37 +662,172 @@ private fun MarkdownMathBlock(block: MarkdownBlockModel.MathBlock) {
 @Composable
 private fun MarkdownCodeBlock(block: MarkdownBlockModel.CodeBlock) {
     val clipboard = LocalClipboardManager.current
-    var expanded by remember(block.code) { mutableStateOf(block.code.length < 4_000) }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(6.dp)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 6.dp, bottom = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = block.language ?: "代码",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val lines = remember(block.code) { block.code.trimEnd().lines() }
+    val isLongCode = lines.size > 25
+    var isExpanded by remember(block.code) { mutableStateOf(!isLongCode) }
+    var showLineNumbers by rememberSaveable { mutableStateOf(false) }
+    var softWrap by rememberSaveable { mutableStateOf(false) }
+
+    val displayLines = if (isExpanded || !isLongCode) lines else lines.take(25)
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            0.5.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        ),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Header Bar
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                // Language badge
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                ) {
+                    Text(
+                        text = (block.language?.ifBlank { "TEXT" } ?: "CODE").uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                // Line numbers toggle
+                IconButton(
+                    onClick = { showLineNumbers = !showLineNumbers },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Text(
+                        text = "#",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (showLineNumbers) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Soft wrap toggle
+                IconButton(
+                    onClick = { softWrap = !softWrap },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Text(
+                        text = if (softWrap) "↵" else "⇄",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (softWrap) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Copy code
                 IconButton(
                     onClick = { clipboard.setText(AnnotatedString(block.code.trimEnd())) },
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(28.dp),
                 ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "复制代码", modifier = Modifier.size(17.dp))
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "复制代码",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
                 }
-                if (block.code.length >= 4_000) {
-                    androidx.compose.material3.TextButton(onClick = { expanded = !expanded }) {
-                        Text(if (expanded) "收起" else "展开")
+
+                // Share code
+                IconButton(
+                    onClick = {
+                        val sendIntent = android.content.Intent().apply {
+                            action = android.content.Intent.ACTION_SEND
+                            putExtra(android.content.Intent.EXTRA_TEXT, block.code.trimEnd())
+                            type = "text/plain"
+                        }
+                        context.startActivity(android.content.Intent.createChooser(sendIntent, "分享代码"))
+                    },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = "分享代码",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+            }
+
+            // Code Content
+            SelectionContainer {
+                val codeScrollState = rememberScrollState()
+                val contentModifier = if (softWrap) {
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
+                } else {
+                    Modifier.fillMaxWidth().horizontalScroll(codeScrollState).padding(horizontal = 10.dp, vertical = 8.dp)
+                }
+
+                Row(modifier = contentModifier) {
+                    if (showLineNumbers) {
+                        Column(modifier = Modifier.padding(end = 12.dp)) {
+                            displayLines.indices.forEach { idx ->
+                                Text(
+                                    text = "${idx + 1}",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    textAlign = TextAlign.End,
+                                )
+                            }
+                        }
+                    }
+
+                    Column {
+                        displayLines.forEach { line ->
+                            Text(
+                                text = line.ifEmpty { " " },
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     }
                 }
             }
-            Text(
-                if (expanded) block.code.trimEnd() else block.code.trimEnd().take(1_800) + "\n…",
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(end = 10.dp),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-            )
+
+            // Expand/Collapse Bar for > 25 lines
+            if (isLongCode) {
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { isExpanded = !isExpanded }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (isExpanded) "▲ 收起代码" else "▼ 展开余下 ${lines.size - 25} 行代码",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
         }
     }
 }
+
 
 @Composable
 private fun MarkdownTable(table: MarkdownBlockModel.Table) {

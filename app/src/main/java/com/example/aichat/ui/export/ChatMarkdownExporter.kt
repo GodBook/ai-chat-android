@@ -55,8 +55,15 @@ object ChatMarkdownExporter {
                         sb.append(message.text.trim()).append("\n\n")
                     }
                 }
+                MessageRole.SYSTEM -> {
+                    sb.append("### ⚙️ 系统设定\n\n")
+                    if (message.text.isNotBlank()) {
+                        sb.append(message.text.trim()).append("\n\n")
+                    }
+                }
             }
             sb.append("---\n\n")
+
         }
 
         sb.append("*— 对话由 AI BOTOY 导出 —*\n")

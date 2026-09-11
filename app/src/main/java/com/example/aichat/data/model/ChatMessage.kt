@@ -131,6 +131,7 @@ fun normalizeOverlayBackgroundColor(value: String): String {
 enum class MessageRole {
     USER,
     ASSISTANT,
+    SYSTEM,
 }
 
 /** Persistence and UI state of a chat message. */
@@ -158,6 +159,10 @@ data class ChatMessage(
     val webSearchResults: List<com.example.aichat.data.network.WebSearchResult>? = null,
     val branchIndex: Int = 0,
     val totalBranches: Int = 1,
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null,
+    val totalTokens: Int? = null,
+    val generationDurationMs: Long? = null,
 )
 
 data class ProviderConfig(

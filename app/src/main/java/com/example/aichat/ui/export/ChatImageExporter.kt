@@ -243,8 +243,12 @@ object ChatImageExporter {
                     )
                     totalHeight += bHeight + 28
                 }
+                MessageRole.SYSTEM -> {
+                    // System messages are not rendered in export image
+                }
             }
         }
+
 
         totalHeight += 120 // Footer
 

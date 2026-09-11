@@ -54,9 +54,12 @@ class DefaultChatRepository(
     private val imageFileStore: ImageFileStore,
     private val client: OpenAiCompatibleClient,
     private val webSearchClient: com.example.aichat.data.network.WebSearchClient = com.example.aichat.data.network.WebSearchClient(),
+    private val context: android.content.Context? = null,
 ) : ChatRepository {
     private val dao: ChatMessageDao = database.chatMessageDao()
     private val conversationDao: ChatConversationDao = database.chatConversationDao()
+    private val personaDao: com.example.aichat.data.local.ChatPersonaDao = database.chatPersonaDao()
+    private val profileDao: com.example.aichat.data.local.ProviderProfileDao = database.providerProfileDao()
 
     override val conversations: Flow<List<ChatConversation>> = conversationDao.observeAll()
         .map { rows -> rows.map { it.toDomain() } }
@@ -87,6 +90,66 @@ class DefaultChatRepository(
         .conflate()
         .flowOn(Dispatchers.IO)
 
+    override fun searchAllMessages(keyword: String): Flow<List<com.example.aichat.data.local.MessageSearchResultItem>> {
+        val clean = keyword.trim()
+        if (clean.isEmpty()) return kotlinx.coroutines.flow.flowOf(emptyList())
+        return dao.searchAllMessages(clean).flowOn(Dispatchers.IO)
+    }
+
+    override fun observeAllPersonas(): Flow<List<com.example.aichat.data.model.ChatPersona>> =
+        personaDao.getAllPersonas()
+            .map { list -> list.map { it.toDomain() } }
+            .flowOn(Dispatchers.IO)
+
+    override suspend fun getPersona(id: String): com.example.aichat.data.model.ChatPersona? = withContext(Dispatchers.IO) {
+        personaDao.getPersonaById(id)?.toDomain()
+    }
+
+    override suspend fun savePersona(persona: com.example.aichat.data.model.ChatPersona) = withContext(Dispatchers.IO) {
+        personaDao.insertOrReplace(persona.toEntity())
+    }
+
+    override suspend fun deleteCustomPersona(id: String) = withContext(Dispatchers.IO) {
+        personaDao.deleteCustomPersona(id)
+    }
+
+    override suspend fun setConversationPersona(conversationId: String, personaId: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            conversationDao.setPersona(normalizeConversationId(conversationId), personaId, System.currentTimeMillis()) > 0
+        }
+
+    override fun observeAllProviderProfiles(): Flow<List<com.example.aichat.data.model.ProviderProfile>> =
+        profileDao.getAllProfiles()
+            .map { list -> list.map { it.toDomain() } }
+            .flowOn(Dispatchers.IO)
+
+    override fun observeDefaultProviderProfile(): Flow<com.example.aichat.data.model.ProviderProfile?> =
+        profileDao.observeDefaultProfile()
+            .map { it?.toDomain() }
+            .flowOn(Dispatchers.IO)
+
+    override suspend fun saveProviderProfile(profile: com.example.aichat.data.model.ProviderProfile) = withContext(Dispatchers.IO) {
+        profileDao.insertOrReplace(profile.toEntity())
+    }
+
+    override suspend fun switchActiveProviderProfile(id: String) = withContext(Dispatchers.IO) {
+        profileDao.switchActiveProfile(id)
+    }
+
+    override suspend fun deleteProviderProfile(id: String) = withContext(Dispatchers.IO) {
+        profileDao.deleteProfile(id)
+    }
+
+    override suspend fun setConversationProviderProfile(conversationId: String, profileId: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            conversationDao.setProviderProfile(normalizeConversationId(conversationId), profileId, System.currentTimeMillis()) > 0
+        }
+
+    override suspend fun setConversationContextWindowLimit(conversationId: String, limit: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            conversationDao.setContextWindowLimit(normalizeConversationId(conversationId), limit.coerceIn(1, 100), System.currentTimeMillis()) > 0
+        }
+
     @Volatile
     private var activeJob: Job? = null
 
@@ -116,7 +179,8 @@ class DefaultChatRepository(
         val cleanText = text.trim()
         require(cleanText.isNotEmpty() || imagePaths.isNotEmpty()) { "消息内容不能为空" }
 
-        val config = readProviderConfig()
+        val (config, personaTemperature) = readProviderConfigForConversation(selectedConversationId)
+        val conversation = conversationDao.getById(selectedConversationId)?.toDomain()
         client.validateConfig(config)
         if (imagePaths.isNotEmpty() && !config.visionEnabled) {
             throw ChatClientException(
@@ -201,12 +265,22 @@ class DefaultChatRepository(
             user.toRequestMessage()
         }
 
+        val limit = conversation?.contextWindowLimit ?: 8
+        val windowSize = if (limit > 0) limit * 2 else Int.MAX_VALUE
+
         val history = run {
             val rawMessages = dao.getForConversation(selectedConversationId).map { it.toDomain() }
             val activeMessages = resolveMessageBranches(rawMessages.filter { it.id != assistant.id })
-            limitContext(activeMessages
-                .filter { it.status == MessageStatus.SENT }
-                .map { if (it.id == user.id) userRequestMessage else it.toRequestMessage() })
+            val sentMessages = activeMessages.filter { it.status == MessageStatus.SENT }
+            val windowedMessages = sentMessages.takeLast(windowSize)
+            val priorList = windowedMessages.map { if (it.id == user.id) userRequestMessage else it.toRequestMessage() }
+
+            val persona = conversation?.personaId?.let { personaDao.getPersonaById(it)?.toDomain() }
+            val systemMessage = persona?.systemPrompt?.takeIf { it.isNotBlank() }?.let {
+                listOf(ChatRequestMessage(role = MessageRole.SYSTEM, text = it))
+            } ?: emptyList()
+
+            systemMessage + limitContext(priorList)
         }
 
         val completed = try {
@@ -215,6 +289,7 @@ class DefaultChatRepository(
                 config = config,
                 history = history,
                 assistant = if (searchResults != null) assistant.copy(webSearchResults = searchResults) else assistant,
+                temperature = personaTemperature,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -309,13 +384,22 @@ class DefaultChatRepository(
         } else {
             user.toRequestMessage()
         }
+        val conversation = conversationDao.getById(selectedConversationId)?.toDomain()
+        val limit = conversation?.contextWindowLimit ?: 8
+        val windowSize = if (limit > 0) limit * 2 else Int.MAX_VALUE
         val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
-        val history = limitContext(activePriorHistory
-            .filter { it.status == MessageStatus.SENT }
+        val sentPrior = activePriorHistory.filter { it.status == MessageStatus.SENT }.takeLast(windowSize)
+
+        val persona = conversation?.personaId?.let { personaDao.getPersonaById(it)?.toDomain() }
+        val systemMessage = persona?.systemPrompt?.takeIf { it.isNotBlank() }?.let {
+            listOf(ChatRequestMessage(role = MessageRole.SYSTEM, text = it))
+        } ?: emptyList()
+
+        val history = systemMessage + limitContext(sentPrior
             .map { it.toRequestMessage() }
             .plus(userRequestMessage))
 
-        val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending)
+        val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending, temperature = persona?.temperature)
         completed.throwIfUnsuccessful()
         pending.id
     }
@@ -330,7 +414,8 @@ class DefaultChatRepository(
         if (target.role != MessageRole.ASSISTANT || target.conversationId != selectedConversationId) {
             return@withRequestLock null
         }
-        val config = readProviderConfig()
+        val (config, personaTemperature) = readProviderConfigForConversation(selectedConversationId)
+        val conversation = conversationDao.getById(selectedConversationId)?.toDomain()
         client.validateConfig(config)
         val all = dao.getForConversation(selectedConversationId).map { it.toDomain() }
         val user = target.requestId?.let { requestId ->
@@ -405,13 +490,21 @@ class DefaultChatRepository(
         } else {
             user.toRequestMessage()
         }
+        val regenLimit = conversation?.contextWindowLimit ?: 8
+        val regenWindowSize = if (regenLimit > 0) regenLimit * 2 else Int.MAX_VALUE
         val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
-        val history = limitContext(activePriorHistory
-            .filter { it.status == MessageStatus.SENT }
+        val sentPrior = activePriorHistory.filter { it.status == MessageStatus.SENT }.takeLast(regenWindowSize)
+
+        val persona = conversation?.personaId?.let { personaDao.getPersonaById(it)?.toDomain() }
+        val systemMessage = persona?.systemPrompt?.takeIf { it.isNotBlank() }?.let {
+            listOf(ChatRequestMessage(role = MessageRole.SYSTEM, text = it))
+        } ?: emptyList()
+
+        val history = systemMessage + limitContext(sentPrior
             .map { it.toRequestMessage() }
             .plus(userRequestMessage))
 
-        val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending)
+        val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending, temperature = personaTemperature)
         completed.throwIfUnsuccessful()
         pending.id
     }
@@ -708,6 +801,39 @@ class DefaultChatRepository(
         return stored.copy(apiKey = apiKeyStore.read())
     }
 
+    private suspend fun readProviderConfigForConversation(conversationId: String): Pair<ProviderConfig, Float?> {
+        val conversation = conversationDao.getById(conversationId)?.toDomain()
+        var baseConfig = readProviderConfig()
+        var temperature: Float? = null
+
+        val profileId = conversation?.providerProfileId
+        if (!profileId.isNullOrBlank()) {
+            val profile = profileDao.getProfileById(profileId)?.toDomain()
+            if (profile != null) {
+                val profileKey = if (context != null) ApiKeyStore(context, namespace = profile.id).read() else null
+                baseConfig = baseConfig.copy(
+                    baseUrl = profile.baseUrl,
+                    model = profile.defaultModel,
+                    apiKey = profileKey ?: baseConfig.apiKey,
+                    visionEnabled = profile.visionEnabled,
+                )
+            }
+        }
+
+        val personaId = conversation?.personaId
+        if (!personaId.isNullOrBlank()) {
+            val persona = personaDao.getPersonaById(personaId)?.toDomain()
+            if (persona != null) {
+                temperature = persona.temperature
+                if (!persona.preferredModel.isNullOrBlank()) {
+                    baseConfig = baseConfig.copy(model = persona.preferredModel)
+                }
+            }
+        }
+
+        return baseConfig to temperature
+    }
+
     /** Creates a row when a caller targets a newly selected or legacy id. */
     private suspend fun ensureConversation(id: String) {
         withContext(Dispatchers.IO) {
@@ -781,6 +907,7 @@ class DefaultChatRepository(
         config: ProviderConfig,
         history: List<ChatRequestMessage>,
         assistant: ChatMessage,
+        temperature: Float? = null,
     ): ChatMessage {
         // Publish the cancellation handle and launch the child under one lock. This closes the
         // small window where a stop tap could observe an id without a cancellable Job.
@@ -793,11 +920,15 @@ class DefaultChatRepository(
                 val responseText = StringBuilder()
                 val thinkingText = StringBuilder()
                 val thinkingStart = System.currentTimeMillis()
+                val generationStart = System.currentTimeMillis()
                 var thinkingDurationMs: Long? = null
                 var lastPersistedLength = 0
                 var lastPersistedThinkingLength = 0
                 var lastPersistedAt = 0L
                 var generationCompleted = false
+                var promptTokens: Int? = null
+                var completionTokens: Int? = null
+                var totalTokens: Int? = null
 
                 suspend fun persistStreamingText() {
                     val now = System.nanoTime() / NANOS_PER_MILLISECOND
@@ -813,6 +944,9 @@ class DefaultChatRepository(
                             thinkingDurationMs = thinkingDurationMs,
                             status = MessageStatus.STREAMING,
                             errorMessage = null,
+                            promptTokens = promptTokens,
+                            completionTokens = completionTokens,
+                            totalTokens = totalTokens,
                         ).toEntity(),
                     )
                     lastPersistedLength = responseText.length
@@ -822,7 +956,7 @@ class DefaultChatRepository(
 
                 try {
                     dao.update(assistant.copy(status = MessageStatus.STREAMING).toEntity())
-                    client.streamChat(config, history).collect { event ->
+                    client.streamChat(config, history, temperature).collect { event ->
                         when (event) {
                             is ChatStreamEvent.ThinkingDelta -> {
                                 thinkingText.append(event.text)
@@ -837,7 +971,14 @@ class DefaultChatRepository(
                                 persistStreamingText()
                             }
 
+                            is ChatStreamEvent.Usage -> {
+                                promptTokens = event.promptTokens
+                                completionTokens = event.completionTokens
+                                totalTokens = event.totalTokens
+                            }
+
                             ChatStreamEvent.Done -> {
+                                val durationMs = System.currentTimeMillis() - generationStart
                                 if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
                                     thinkingDurationMs = System.currentTimeMillis() - thinkingStart
                                 }
@@ -849,6 +990,10 @@ class DefaultChatRepository(
                                             thinkingDurationMs = thinkingDurationMs,
                                             status = MessageStatus.SENT,
                                             errorMessage = null,
+                                            promptTokens = promptTokens,
+                                            completionTokens = completionTokens,
+                                            totalTokens = totalTokens,
+                                            generationDurationMs = durationMs,
                                         ).toEntity(),
                                     )
                                     conversationDao.touch(assistant.conversationId, System.currentTimeMillis())
@@ -862,6 +1007,7 @@ class DefaultChatRepository(
                         // The answer is already terminal; keep the SENT row even if the parent
                         // scope is cancelled while the collector is unwinding.
                     } else if (stopRequestedFor == assistant.id) {
+                        val durationMs = System.currentTimeMillis() - generationStart
                         if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
                             thinkingDurationMs = System.currentTimeMillis() - thinkingStart
                         }
@@ -874,6 +1020,10 @@ class DefaultChatRepository(
                                     thinkingDurationMs = thinkingDurationMs,
                                     status = MessageStatus.INTERRUPTED,
                                     errorMessage = "已停止生成，可点击重试",
+                                    promptTokens = promptTokens,
+                                    completionTokens = completionTokens,
+                                    totalTokens = totalTokens,
+                                    generationDurationMs = durationMs,
                                 ).toEntity(),
                             )
                             conversationDao.touch(assistant.conversationId, System.currentTimeMillis())
@@ -883,6 +1033,7 @@ class DefaultChatRepository(
                     }
                 } catch (exception: ChatClientException) {
                     val interrupted = exception.kind == ChatErrorKind.STREAM_INTERRUPTED
+                    val durationMs = System.currentTimeMillis() - generationStart
                     if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
                         thinkingDurationMs = System.currentTimeMillis() - thinkingStart
                     }
@@ -895,11 +1046,16 @@ class DefaultChatRepository(
                                 thinkingDurationMs = thinkingDurationMs,
                                 status = if (interrupted) MessageStatus.INTERRUPTED else MessageStatus.FAILED,
                                 errorMessage = exception.message,
+                                promptTokens = promptTokens,
+                                completionTokens = completionTokens,
+                                totalTokens = totalTokens,
+                                generationDurationMs = durationMs,
                             ).toEntity(),
                         )
                         conversationDao.touch(assistant.conversationId, System.currentTimeMillis())
                     }
                 } catch (exception: Exception) {
+                    val durationMs = System.currentTimeMillis() - generationStart
                     if (thinkingDurationMs == null && thinkingText.isNotEmpty()) {
                         thinkingDurationMs = System.currentTimeMillis() - thinkingStart
                     }
@@ -912,6 +1068,10 @@ class DefaultChatRepository(
                                 thinkingDurationMs = thinkingDurationMs,
                                 status = MessageStatus.FAILED,
                                 errorMessage = exception.message ?: "发送失败",
+                                promptTokens = promptTokens,
+                                completionTokens = completionTokens,
+                                totalTokens = totalTokens,
+                                generationDurationMs = durationMs,
                             ).toEntity(),
                         )
                         conversationDao.touch(assistant.conversationId, System.currentTimeMillis())

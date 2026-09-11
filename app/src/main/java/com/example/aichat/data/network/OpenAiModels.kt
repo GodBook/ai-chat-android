@@ -7,6 +7,14 @@ import kotlinx.serialization.Serializable
 internal data class ChatCompletionChunk(
     val choices: List<ChunkChoice> = emptyList(),
     val error: ProviderErrorBody? = null,
+    val usage: CompletionUsage? = null,
+)
+
+@Serializable
+internal data class CompletionUsage(
+    @SerialName("prompt_tokens") val promptTokens: Int? = null,
+    @SerialName("completion_tokens") val completionTokens: Int? = null,
+    @SerialName("total_tokens") val totalTokens: Int? = null,
 )
 
 @Serializable

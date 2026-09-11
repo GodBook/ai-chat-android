@@ -23,9 +23,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import com.example.aichat.data.local.MessageSearchResultItem
+
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -132,7 +135,12 @@ internal fun ContactsScreen(
     onSetConversationIcon: (String, String?) -> Unit = { _, _ -> },
     onTemporaryConversation: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    deepSearchResults: List<MessageSearchResultItem> = emptyList(),
+    isDeepSearching: Boolean = false,
+    onDeepSearchQueryChange: (String) -> Unit = {},
+    onJumpToMessage: (conversationId: String, messageId: String) -> Unit = { _, _ -> },
 ) {
+
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -242,20 +250,25 @@ internal fun ContactsScreen(
                     if (searchOpen) {
                         OutlinedTextField(
                             value = searchQuery,
-                            onValueChange = { searchQuery = it },
+                            onValueChange = {
+                                searchQuery = it
+                                onDeepSearchQueryChange(it)
+                            },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-                            placeholder = { Text("搜索聊天名称或最近消息") },
+                            placeholder = { Text("搜索聊天或跨会话全文检索…") },
                             singleLine = true,
                             trailingIcon = {
                                 TextButton(
                                     onClick = {
                                         searchQuery = ""
+                                        onDeepSearchQueryChange("")
                                         searchOpen = false
                                     },
                                 ) { Text("关闭") }
                             },
                         )
                     }
+
                 }
             }
         },
@@ -315,14 +328,15 @@ internal fun ContactsScreen(
             ) {
                 Text("正在准备聊天列表…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        } else if (visibleConversations.isEmpty()) {
+        } else if (visibleConversations.isEmpty() && deepSearchResults.isEmpty() && !isDeepSearching) {
             Box(
                 modifier = Modifier.padding(padding).fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("没有匹配的聊天", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (searchQuery.isNotBlank()) "没有匹配的聊天或消息" else "没有匹配的聊天", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
+
             val groupedConversations = remember(visibleConversations) {
                 val namedGroups = visibleConversations
                     .mapNotNull { it.groupName?.trim()?.takeIf { g -> g.isNotEmpty() } }
@@ -399,9 +413,51 @@ internal fun ContactsScreen(
                         }
                     }
                 }
+
+                if (searchQuery.isNotBlank()) {
+                    if (isDeepSearching) {
+                        item(key = "deep_search_loading") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "🔍 正在进行跨会话全文检索…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    if (deepSearchResults.isNotEmpty()) {
+                        item(key = "deep_search_header") {
+                            Text(
+                                text = "消息全文匹配 (${deepSearchResults.size} 条)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                        items(deepSearchResults, key = { "msg_search_${it.id}" }) { resultItem ->
+                            MessageSearchResultRow(
+                                item = resultItem,
+                                keyword = searchQuery,
+                                onClick = {
+                                    searchQuery = ""
+                                    searchOpen = false
+                                    onDeepSearchQueryChange("")
+                                    onJumpToMessage(resultItem.conversationId, resultItem.id)
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+
 
     iconTarget?.let { target ->
         ConversationIconDialog(
@@ -1043,3 +1099,60 @@ private fun ChatMessage.previewText(): String = when {
     status == MessageStatus.FAILED || status == MessageStatus.INTERRUPTED -> "回复失败，点击查看"
     else -> "开始一段新的对话"
 }
+
+@Composable
+private fun MessageSearchResultRow(
+    item: MessageSearchResultItem,
+    keyword: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false),
+                ) {
+                    Text(
+                        text = item.conversationIcon ?: "💬",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text(
+                        text = item.conversationTitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = if (item.role == "USER") "👤 用户" else "🤖 AI",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            HighlightedText(
+                text = item.text,
+                keyword = keyword,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+

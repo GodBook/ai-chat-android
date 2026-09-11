@@ -13,6 +13,7 @@ import androidx.room.ColumnInfo
         Index(value = ["requestId"]),
         Index(value = ["conversationId"]),
         Index(value = ["conversationId", "createdAt", "id"]),
+        Index(value = ["text"]),
     ],
 )
 data class ChatMessageEntity(
@@ -29,4 +30,8 @@ data class ChatMessageEntity(
     val thinkingContent: String? = null,
     val thinkingDurationMs: Long? = null,
     val webSearchResults: String? = null,
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null,
+    val totalTokens: Int? = null,
+    val generationDurationMs: Long? = null,
 )

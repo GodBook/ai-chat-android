@@ -170,7 +170,15 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onSetConversationIcon = viewModel::setConversationIcon,
                     onTemporaryConversation = { viewModel.startTemporaryConversation { navController.navigate(Routes.TEMPORARY) } },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    deepSearchResults = state.deepSearchResults,
+                    isDeepSearching = state.isDeepSearching,
+                    onDeepSearchQueryChange = viewModel::setDeepSearchQuery,
+                    onJumpToMessage = { convId, msgId ->
+                        viewModel.jumpToMessage(convId, msgId)
+                        navController.navigate(Routes.CHAT)
+                    },
                 )
+
             }
             composable(Routes.CHAT) {
                 ChatScreen(
@@ -199,6 +207,29 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onToggleWebSearch = viewModel::toggleWebSearch,
                     onSwitchBranch = viewModel::switchMessageBranch,
                     onRenameConversation = viewModel::renameConversation,
+                    onSpeakMessage = viewModel::speakMessage,
+                    onPauseTts = viewModel::pauseTts,
+                    onResumeTts = viewModel::resumeTts,
+                    onStopTts = viewModel::stopTts,
+                    onPrevTts = viewModel::seekTtsPrev,
+                    onNextTts = viewModel::seekTtsNext,
+                    onCycleTtsSpeechRate = viewModel::cycleTtsSpeechRate,
+                    onSetPersona = { personaId ->
+                        state.selectedConversationId?.let { convId ->
+                            viewModel.setConversationPersona(convId, personaId)
+                        }
+                    },
+                    onSetProviderProfile = { profileId ->
+                        state.selectedConversationId?.let { convId ->
+                            viewModel.setConversationProviderProfile(convId, profileId)
+                        }
+                    },
+                    onSetContextWindowLimit = { limit ->
+                        state.selectedConversationId?.let { convId ->
+                            viewModel.setContextWindowLimit(convId, limit)
+                        }
+                    },
+                    onClearHighlightedMessage = viewModel::clearHighlightedMessage,
                 )
             }
             composable(Routes.TEMPORARY) {
@@ -226,6 +257,14 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onClear = viewModel::clearConversation, onDraftRestored = {},
                     onSelectModelPreset = viewModel::switchModelPreset, onExport = {},
                     onToggleWebSearch = viewModel::toggleWebSearch,
+                    onSpeakMessage = viewModel::speakMessage,
+                    onPauseTts = viewModel::pauseTts,
+                    onResumeTts = viewModel::resumeTts,
+                    onStopTts = viewModel::stopTts,
+                    onPrevTts = viewModel::seekTtsPrev,
+                    onNextTts = viewModel::seekTtsNext,
+                    onCycleTtsSpeechRate = viewModel::cycleTtsSpeechRate,
+                    onClearHighlightedMessage = viewModel::clearHighlightedMessage,
                 ) else LaunchedEffect(Unit) { if (!viewModel.hasTemporaryConversation()) navController.popBackStack(Routes.CONTACTS, false) }
             }
             composable(Routes.SETTINGS) {
@@ -321,6 +360,10 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onExportBackup = { uri -> viewModel.exportBackup(context, uri) },
                     onImportBackup = { uri -> viewModel.importBackup(context, uri) },
                     onResetBackupRestoreState = viewModel::resetBackupRestoreState,
+                    onSavePersona = viewModel::savePersona,
+                    onDeletePersona = viewModel::deleteCustomPersona,
+                    onSaveProfile = viewModel::saveProviderProfile,
+                    onDeleteProfile = viewModel::deleteCustomProfile,
                 )
             }
         }

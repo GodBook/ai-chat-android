@@ -132,4 +132,21 @@ interface ChatRepository {
 
     suspend fun probeModelConnection(config: ProviderConfig): ProbeResult =
         ProbeResult(false, 0L, "未实现")
+
+    fun searchAllMessages(keyword: String): Flow<List<com.example.aichat.data.local.MessageSearchResultItem>> = emptyFlow()
+
+    fun observeAllPersonas(): Flow<List<com.example.aichat.data.model.ChatPersona>> = emptyFlow()
+    suspend fun getPersona(id: String): com.example.aichat.data.model.ChatPersona? = null
+    suspend fun savePersona(persona: com.example.aichat.data.model.ChatPersona) {}
+    suspend fun deleteCustomPersona(id: String) {}
+    suspend fun setConversationPersona(conversationId: String, personaId: String?): Boolean = false
+
+    fun observeAllProviderProfiles(): Flow<List<com.example.aichat.data.model.ProviderProfile>> = emptyFlow()
+    fun observeDefaultProviderProfile(): Flow<com.example.aichat.data.model.ProviderProfile?> = emptyFlow()
+    suspend fun saveProviderProfile(profile: com.example.aichat.data.model.ProviderProfile) {}
+    suspend fun switchActiveProviderProfile(id: String) {}
+    suspend fun deleteProviderProfile(id: String) {}
+    suspend fun setConversationProviderProfile(conversationId: String, profileId: String?): Boolean = false
+
+    suspend fun setConversationContextWindowLimit(conversationId: String, limit: Int): Boolean = false
 }

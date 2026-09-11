@@ -2,11 +2,15 @@ package com.example.aichat.data.model
 
 import com.example.aichat.data.local.ChatMessageEntity
 import com.example.aichat.data.local.ChatConversationEntity
+import com.example.aichat.data.local.ChatPersonaEntity
+import com.example.aichat.data.local.ProviderProfileEntity
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 
 private val imagePathJson = Json { ignoreUnknownKeys = true }
+
 
 internal fun ChatMessageEntity.toDomain(): ChatMessage = ChatMessage(
     id = id,
@@ -21,6 +25,10 @@ internal fun ChatMessageEntity.toDomain(): ChatMessage = ChatMessage(
     thinkingContent = thinkingContent,
     thinkingDurationMs = thinkingDurationMs,
     webSearchResults = decodeWebSearchResults(webSearchResults),
+    promptTokens = promptTokens,
+    completionTokens = completionTokens,
+    totalTokens = totalTokens,
+    generationDurationMs = generationDurationMs,
 )
 
 internal fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
@@ -36,6 +44,10 @@ internal fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
     thinkingContent = thinkingContent,
     thinkingDurationMs = thinkingDurationMs,
     webSearchResults = encodeWebSearchResults(webSearchResults),
+    promptTokens = promptTokens,
+    completionTokens = completionTokens,
+    totalTokens = totalTokens,
+    generationDurationMs = generationDurationMs,
 )
 
 internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversation(
@@ -46,6 +58,9 @@ internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversat
     groupName = groupName,
     isPinned = isPinned,
     icon = icon,
+    personaId = personaId,
+    providerProfileId = providerProfileId,
+    contextWindowLimit = contextWindowLimit,
 )
 
 internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversationEntity(
@@ -56,7 +71,71 @@ internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversat
     groupName = groupName,
     isPinned = isPinned,
     icon = icon,
+    personaId = personaId,
+    providerProfileId = providerProfileId,
+    contextWindowLimit = contextWindowLimit,
 )
+
+internal fun ChatPersonaEntity.toDomain(): ChatPersona = ChatPersona(
+    id = id,
+    name = name,
+    avatar = avatar,
+    description = description,
+    systemPrompt = systemPrompt,
+    temperature = temperature,
+    preferredModel = preferredModel,
+    category = category,
+    isBuiltIn = isBuiltIn,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+internal fun ChatPersona.toEntity(): ChatPersonaEntity = ChatPersonaEntity(
+    id = id,
+    name = name,
+    avatar = avatar,
+    description = description,
+    systemPrompt = systemPrompt,
+    temperature = temperature,
+    preferredModel = preferredModel,
+    category = category,
+    isBuiltIn = isBuiltIn,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+internal fun ProviderProfileEntity.toDomain(): ProviderProfile = ProviderProfile(
+    id = id,
+    name = name,
+    baseUrl = baseUrl,
+    defaultModel = defaultModel,
+    candidateModels = runCatching {
+        imagePathJson.decodeFromString<List<String>>(candidateModels)
+    }.getOrDefault(emptyList()),
+    visionEnabled = visionEnabled,
+    customHeaders = runCatching {
+        imagePathJson.decodeFromString<Map<String, String>>(customHeaders)
+    }.getOrDefault(emptyMap()),
+    isDefault = isDefault,
+    presetType = presetType,
+    sortOrder = sortOrder,
+    createdAt = createdAt,
+)
+
+internal fun ProviderProfile.toEntity(): ProviderProfileEntity = ProviderProfileEntity(
+    id = id,
+    name = name,
+    baseUrl = baseUrl,
+    defaultModel = defaultModel,
+    candidateModels = imagePathJson.encodeToString(candidateModels),
+    visionEnabled = visionEnabled,
+    customHeaders = imagePathJson.encodeToString(customHeaders),
+    isDefault = isDefault,
+    presetType = presetType,
+    sortOrder = sortOrder,
+    createdAt = createdAt,
+)
+
 
 internal fun String.toMessageRole(): MessageRole = runCatching {
     MessageRole.valueOf(this)

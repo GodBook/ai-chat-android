@@ -8,6 +8,16 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+data class MessageSearchResultItem(
+    val id: String,
+    val conversationId: String,
+    val role: String,
+    val text: String,
+    val createdAt: Long,
+    val conversationTitle: String,
+    val conversationIcon: String?,
+)
+
 @Dao
 interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages ORDER BY createdAt ASC, id ASC")
@@ -58,6 +68,20 @@ interface ChatMessageDao {
             "ORDER BY createdAt ASC, id ASC",
     )
     suspend fun getByRequestId(conversationId: String, requestId: String): List<ChatMessageEntity>
+
+    @Query(
+        """
+        SELECT m.id AS id, m.conversationId AS conversationId, m.role AS role,
+               m.text AS text, m.createdAt AS createdAt,
+               c.title AS conversationTitle, c.icon AS conversationIcon
+        FROM chat_messages AS m
+        INNER JOIN chat_conversations AS c ON m.conversationId = c.id
+        WHERE m.text LIKE '%' || :keyword || '%'
+        ORDER BY m.createdAt DESC
+        LIMIT 100
+        """,
+    )
+    fun searchAllMessages(keyword: String): Flow<List<MessageSearchResultItem>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(message: ChatMessageEntity)

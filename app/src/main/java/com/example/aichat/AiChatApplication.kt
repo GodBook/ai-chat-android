@@ -45,5 +45,8 @@ class AppContainer(application: Application) {
         imageFileStore = imageFileStore,
         client = client,
         webSearchClient = webSearchClient,
+        context = application,
     )
+    val ttsManager = com.example.aichat.ui.tts.TtsManager.getInstance(application)
 }
+

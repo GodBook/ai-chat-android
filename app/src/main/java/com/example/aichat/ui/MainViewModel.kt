@@ -16,7 +16,13 @@ import com.example.aichat.ui.export.ChatImageExporter
 import com.example.aichat.ui.export.ChatMarkdownExporter
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
+import com.example.aichat.data.model.ChatPersona
+import com.example.aichat.data.model.ProviderProfile
+import com.example.aichat.data.local.MessageSearchResultItem
+import com.example.aichat.ui.tts.TtsManager
+import com.example.aichat.ui.tts.TtsPlaybackState
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
+
 import com.example.aichat.data.model.MAX_SCREENSHOT_PROMPT_LENGTH
 import com.example.aichat.data.model.MessageRole
 import com.example.aichat.data.model.MessageStatus
@@ -111,7 +117,17 @@ data class MainUiState(
     val webSearchActive: Boolean = false,
     val isTemporary: Boolean = false,
     val isSearching: Boolean = false,
+    val personas: List<ChatPersona> = emptyList(),
+    val providerProfiles: List<ProviderProfile> = emptyList(),
+    val activePersona: ChatPersona? = null,
+    val activeProviderProfile: ProviderProfile? = null,
+    val deepSearchQuery: String = "",
+    val deepSearchResults: List<MessageSearchResultItem> = emptyList(),
+    val isDeepSearching: Boolean = false,
+    val highlightedMessageId: String? = null,
+    val ttsPlaybackState: TtsPlaybackState = TtsPlaybackState(),
 )
+
 
 private data class ConversationSnapshot(
     val conversations: List<ChatConversation>,
@@ -148,9 +164,11 @@ class MainViewModel(
     private val updateManager: AppUpdateManager,
     private val client: com.example.aichat.data.network.OpenAiCompatibleClient,
     private val webSearchClient: com.example.aichat.data.network.WebSearchClient,
+    private val ttsManager: TtsManager,
 ) : ViewModel() {
     private val temporary = com.example.aichat.data.repository.TemporaryChatSession(viewModelScope, client::streamChat) { query, config -> webSearchClient.search(query, config) }
     private var temporaryPreparation: kotlinx.coroutines.Job? = null
+    private var deepSearchJob: kotlinx.coroutines.Job? = null
     private val selectedConversationId = MutableStateFlow<String?>(null)
     private val selectedImagePaths = MutableStateFlow<List<String>>(emptyList())
     private val transientMessage = MutableStateFlow<String?>(null)
@@ -163,6 +181,11 @@ class MainViewModel(
     private val webSearchActive = MutableStateFlow<Boolean?>(null)
     private val selectedBranches = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val conversationGeneration = AtomicLong(0)
+    private val deepSearchQuery = MutableStateFlow("")
+    private val deepSearchResults = MutableStateFlow<List<MessageSearchResultItem>>(emptyList())
+    private val isDeepSearching = MutableStateFlow(false)
+    private val highlightedMessageId = MutableStateFlow<String?>(null)
+
 
     private val conversationSelection: Flow<ConversationSelection> = combine(
         repository.conversations,
@@ -267,7 +290,27 @@ class MainViewModel(
             isSearching = temp.searching,
             draftToRestore = null,
         )
+    }.combine(repository.observeAllPersonas()) { state, personas ->
+        state.copy(personas = personas)
+    }.combine(repository.observeAllProviderProfiles()) { state, profiles ->
+        state.copy(providerProfiles = profiles)
+    }.combine(deepSearchQuery) { state, query ->
+        state.copy(deepSearchQuery = query)
+    }.combine(deepSearchResults) { state, results ->
+        state.copy(deepSearchResults = results)
+    }.combine(isDeepSearching) { state, searching ->
+        state.copy(isDeepSearching = searching)
+    }.combine(highlightedMessageId) { state, hl ->
+        state.copy(highlightedMessageId = hl)
+    }.combine(ttsManager.playbackState) { state, tts ->
+        state.copy(ttsPlaybackState = tts)
+    }.combine(conversationSelection) { state, selection ->
+        val selectedConv = selection.conversations.firstOrNull { it.id == selection.selectedId }
+        val persona = selectedConv?.personaId?.let { id -> state.personas.firstOrNull { it.id == id } }
+        val profile = selectedConv?.providerProfileId?.let { id -> state.providerProfiles.firstOrNull { it.id == id } }
+        state.copy(activePersona = persona, activeProviderProfile = profile)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
+
 
     init {
         loadStorageStats()
@@ -304,8 +347,10 @@ class MainViewModel(
         conversationGeneration.incrementAndGet()
         discardComposerImages()
         draftToRestore.value = null
+        highlightedMessageId.value = null
         selectedConversationId.value = id
         return true
+
     }
 
     fun createConversation(
@@ -1118,6 +1163,182 @@ class MainViewModel(
         }
     }
 
+    // --- 角色面具 (Personas) ---
+    fun setConversationPersona(conversationId: String, personaId: String?) {
+        viewModelScope.launch {
+            try {
+                repository.setConversationPersona(conversationId, personaId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun savePersona(persona: ChatPersona) {
+        viewModelScope.launch {
+            try {
+                repository.savePersona(persona)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun deleteCustomPersona(personaId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteCustomPersona(personaId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    // --- 服务商配置 (Provider Profiles) ---
+    fun setConversationProviderProfile(conversationId: String, profileId: String?) {
+        viewModelScope.launch {
+            try {
+                repository.setConversationProviderProfile(conversationId, profileId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun saveProviderProfile(profile: ProviderProfile, apiKey: String? = null, context: Context? = null) {
+        viewModelScope.launch {
+            try {
+                repository.saveProviderProfile(profile)
+                if (apiKey != null && context != null) {
+                    ApiKeyStore(context, namespace = profile.id).save(apiKey)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    fun deleteCustomProfile(profileId: String, context: Context? = null) {
+        viewModelScope.launch {
+            try {
+                repository.deleteProviderProfile(profileId)
+                if (context != null) {
+                    ApiKeyStore(context, namespace = profileId).clear()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    // --- 上下文滑窗限制 ---
+    fun setContextWindowLimit(conversationId: String, limit: Int) {
+        viewModelScope.launch {
+            try {
+                repository.setConversationContextWindowLimit(conversationId, limit)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
+    // --- 跨会话深度全文搜索与定位跳转 ---
+    fun setDeepSearchQuery(query: String) {
+        deepSearchQuery.value = query
+        val trimmed = query.trim()
+        deepSearchJob?.cancel()
+        if (trimmed.isEmpty()) {
+            deepSearchResults.value = emptyList()
+            isDeepSearching.value = false
+            return
+        }
+        deepSearchJob = viewModelScope.launch {
+            isDeepSearching.value = true
+            try {
+                repository.searchAllMessages(trimmed).collect { results ->
+                    deepSearchResults.value = results
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                deepSearchResults.value = emptyList()
+            } finally {
+                isDeepSearching.value = false
+            }
+        }
+    }
+
+    fun jumpToMessage(conversationId: String, messageId: String) {
+        if (conversationId != selectedConversationId.value) {
+            conversationGeneration.incrementAndGet()
+            discardComposerImages()
+            draftToRestore.value = null
+            selectedConversationId.value = conversationId
+        }
+        highlightedMessageId.value = messageId
+    }
+
+    fun clearHighlightedMessage() {
+        highlightedMessageId.value = null
+    }
+
+    // --- 离线 TTS 语音朗读 ---
+    fun speakMessage(messageId: String, text: String) {
+        ttsManager.speak(messageId, text)
+    }
+
+    fun pauseTts() {
+        ttsManager.pause()
+    }
+
+    fun resumeTts() {
+        ttsManager.resume()
+    }
+
+    fun stopTts() {
+        ttsManager.stop()
+    }
+
+    fun seekTtsPrev() {
+        ttsManager.seekPrev()
+    }
+
+    fun seekTtsNext() {
+        ttsManager.seekNext()
+    }
+
+    fun cycleTtsSpeechRate() {
+
+        val currentRate = ttsManager.playbackState.value.speechRate
+        val rates = listOf(0.8f, 1.0f, 1.25f, 1.5f, 2.0f)
+        val currentIndex = rates.indexOfFirst { kotlin.math.abs(it - currentRate) < 0.05f }
+        val nextRate = if (currentIndex in rates.indices) {
+            rates[(currentIndex + 1) % rates.size]
+        } else {
+            1.0f
+        }
+        ttsManager.setSpeechRate(nextRate)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        ttsManager.stop()
+    }
+
     private fun Throwable.userFacingMessage(): String = when (this) {
         is ChatClientException -> message
         is AppUpdateException -> message
@@ -1137,6 +1358,8 @@ class MainViewModelFactory(private val container: AppContainer) : ViewModelProvi
             updateManager = container.updateManager,
             client = container.client,
             webSearchClient = container.webSearchClient,
+            ttsManager = container.ttsManager,
         ) as T
     }
 }
+

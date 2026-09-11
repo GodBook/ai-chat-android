@@ -19,4 +19,7 @@ data class ChatConversationEntity(
     val groupName: String? = null,
     val isPinned: Boolean = false,
     val icon: String? = null,
+    val personaId: String? = null,
+    val providerProfileId: String? = null,
+    val contextWindowLimit: Int = 8,
 )

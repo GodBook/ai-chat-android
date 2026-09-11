@@ -6,17 +6,28 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
+import com.example.aichat.data.model.BUILT_IN_PERSONAS
+import com.example.aichat.data.model.BUILT_IN_PROVIDER_PROFILES
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_ID
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 @Database(
-    entities = [ChatMessageEntity::class, ChatConversationEntity::class],
-    version = 8,
+    entities = [
+        ChatMessageEntity::class,
+        ChatConversationEntity::class,
+        ChatPersonaEntity::class,
+        ProviderProfileEntity::class,
+    ],
+    version = 9,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun chatConversationDao(): ChatConversationDao
+    abstract fun chatPersonaDao(): ChatPersonaDao
+    abstract fun providerProfileDao(): ProviderProfileDao
 
     companion object {
         /**
@@ -49,9 +60,6 @@ abstract class ChatDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_chat_messages_conversationId` " +
                         "ON `chat_messages` (`conversationId`)",
                 )
-                // An aggregate SELECT always yields one row, including for an
-                // empty v1 database. SQLite's clock is only a fallback for the
-                // fresh-install-without-messages case.
                 database.execSQL(
                     """
                     INSERT OR IGNORE INTO `chat_conversations` (`id`, `title`, `createdAt`, `updatedAt`)
@@ -121,15 +129,105 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `chat_personas` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `avatar` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `systemPrompt` TEXT NOT NULL,
+                        `temperature` REAL NOT NULL DEFAULT 1.0,
+                        `preferredModel` TEXT,
+                        `category` TEXT NOT NULL DEFAULT 'general',
+                        `isBuiltIn` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_personas_category` ON `chat_personas` (`category`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_personas_createdAt` ON `chat_personas` (`createdAt`)")
+
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `provider_profiles` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `baseUrl` TEXT NOT NULL,
+                        `defaultModel` TEXT NOT NULL,
+                        `candidateModels` TEXT NOT NULL DEFAULT '[]',
+                        `visionEnabled` INTEGER NOT NULL DEFAULT 1,
+                        `customHeaders` TEXT NOT NULL DEFAULT '{}',
+                        `isDefault` INTEGER NOT NULL DEFAULT 0,
+                        `presetType` TEXT NOT NULL DEFAULT 'custom',
+                        `sortOrder` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `personaId` TEXT")
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `providerProfileId` TEXT")
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `contextWindowLimit` INTEGER NOT NULL DEFAULT 8")
+
+                database.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `promptTokens` INTEGER")
+                database.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `completionTokens` INTEGER")
+                database.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `totalTokens` INTEGER")
+                database.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `generationDurationMs` INTEGER")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_messages_text` ON `chat_messages` (`text`)")
+
+                insertDefaultSeedData(database)
+            }
+        }
+
+        private fun insertDefaultSeedData(database: SupportSQLiteDatabase) {
+            for (persona in BUILT_IN_PERSONAS) {
+                database.execSQL(
+                    """
+                    INSERT OR IGNORE INTO `chat_personas`
+                    (`id`, `name`, `avatar`, `description`, `systemPrompt`, `temperature`, `preferredModel`, `category`, `isBuiltIn`, `createdAt`, `updatedAt`)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                    arrayOf<Any?>(
+                        persona.id, persona.name, persona.avatar, persona.description,
+                        persona.systemPrompt, persona.temperature, persona.preferredModel,
+                        persona.category, if (persona.isBuiltIn) 1 else 0, persona.createdAt, persona.updatedAt,
+                    ),
+                )
+            }
+
+            for (profile in BUILT_IN_PROVIDER_PROFILES) {
+                database.execSQL(
+                    """
+                    INSERT OR IGNORE INTO `provider_profiles`
+                    (`id`, `name`, `baseUrl`, `defaultModel`, `candidateModels`, `visionEnabled`, `customHeaders`, `isDefault`, `presetType`, `sortOrder`, `createdAt`)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                    arrayOf<Any?>(
+                        profile.id, profile.name, profile.baseUrl, profile.defaultModel,
+                        Json.encodeToString(profile.candidateModels), if (profile.visionEnabled) 1 else 0,
+                        Json.encodeToString(profile.customHeaders), if (profile.isDefault) 1 else 0,
+                        profile.presetType, profile.sortOrder, profile.createdAt,
+                    ),
+                )
+            }
+        }
+
         private val CREATE_DEFAULT_CONVERSATION = object : RoomDatabase.Callback() {
             override fun onCreate(database: SupportSQLiteDatabase) {
                 super.onCreate(database)
                 val now = System.currentTimeMillis()
                 database.execSQL(
                     "INSERT OR IGNORE INTO `chat_conversations` " +
-                        "(`id`, `title`, `createdAt`, `updatedAt`, `isPinned`) VALUES (?, ?, ?, ?, ?)",
-                    arrayOf<Any>(DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE, now, now, 0),
+                        "(`id`, `title`, `createdAt`, `updatedAt`, `isPinned`, `contextWindowLimit`) VALUES (?, ?, ?, ?, ?, ?)",
+                    arrayOf<Any>(DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE, now, now, 0, 8),
                 )
+                insertDefaultSeedData(database)
             }
         }
 
@@ -143,7 +241,16 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "ai_chat.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                        MIGRATION_7_8,
+                        MIGRATION_8_9,
+                    )
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()
                     .also { instance = it }

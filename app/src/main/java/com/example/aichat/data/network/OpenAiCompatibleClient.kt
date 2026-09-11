@@ -50,6 +50,7 @@ class ChatClientException(
 sealed interface ChatStreamEvent {
     data class Delta(val text: String) : ChatStreamEvent
     data class ThinkingDelta(val text: String) : ChatStreamEvent
+    data class Usage(val promptTokens: Int, val completionTokens: Int, val totalTokens: Int) : ChatStreamEvent
     data object Done : ChatStreamEvent
 }
 
@@ -88,6 +89,7 @@ class OpenAiCompatibleClient(
     fun streamChat(
         config: ProviderConfig,
         messages: List<ChatRequestMessage>,
+        temperature: Float? = null,
     ): Flow<ChatStreamEvent> = flow {
         val candidates = if (config.autoFallbackEnabled) {
             modelCandidatesFor(config.model)
@@ -98,7 +100,7 @@ class OpenAiCompatibleClient(
         for ((index, model) in candidates.withIndex()) {
             var emittedAnyText = false
             try {
-                streamChatOnce(config, model, messages).collect { event ->
+                streamChatOnce(config, model, messages, temperature).collect { event ->
                     if (event is ChatStreamEvent.Delta || event is ChatStreamEvent.ThinkingDelta) emittedAnyText = true
                     emit(event)
                 }
@@ -119,6 +121,7 @@ class OpenAiCompatibleClient(
         config: ProviderConfig,
         model: String,
         messages: List<ChatRequestMessage>,
+        temperature: Float? = null,
     ): Flow<ChatStreamEvent> = flow {
         val endpoint = validateAndBuildEndpoint(config)
         val request = Request.Builder()
@@ -126,7 +129,7 @@ class OpenAiCompatibleClient(
             .header("Authorization", "Bearer ${config.apiKey!!.trim()}")
             .header("Accept", "text/event-stream")
             .header("Cache-Control", "no-cache")
-            .post(ChatCompletionsRequestBody(model.trim(), messages, imageFileStore))
+            .post(ChatCompletionsRequestBody(model.trim(), messages, imageFileStore, temperature))
             .build()
         val call = client.newCall(request)
         val cancellationSignal = call.cancellationSignal(currentCoroutineContext()[Job])
@@ -197,6 +200,14 @@ class OpenAiCompatibleClient(
                         }
                         choice.delta.content?.takeIf { it.isNotEmpty() }?.let { content ->
                             handleContentText(content)
+                        }
+                    }
+                    chunk.usage?.let { u ->
+                        val p = u.promptTokens ?: 0
+                        val c = u.completionTokens ?: 0
+                        val t = u.totalTokens ?: (p + c)
+                        if (t > 0) {
+                            emit(ChatStreamEvent.Usage(p, c, t))
                         }
                     }
                 }
@@ -407,13 +418,18 @@ private class ChatCompletionsRequestBody(
     private val model: String,
     private val messages: List<ChatRequestMessage>,
     private val imageFileStore: ImageStore,
+    private val temperature: Float? = null,
 ) : RequestBody() {
     override fun contentType() = "application/json; charset=utf-8".toMediaType()
 
     override fun writeTo(sink: BufferedSink) {
         sink.writeUtf8("{\"model\":")
         sink.writeUtf8(jsonQuote(model))
-        sink.writeUtf8(",\"stream\":true,\"messages\":[")
+        sink.writeUtf8(",\"stream\":true,\"stream_options\":{\"include_usage\":true}")
+        if (temperature != null) {
+            sink.writeUtf8(",\"temperature\":$temperature")
+        }
+        sink.writeUtf8(",\"messages\":[")
         messages.forEachIndexed { index, message ->
             if (index > 0) sink.writeByte(','.code)
             sink.writeUtf8("{\"role\":")
@@ -482,4 +498,5 @@ private val MessageRole.providerValue: String
     get() = when (this) {
         MessageRole.USER -> "user"
         MessageRole.ASSISTANT -> "assistant"
+        MessageRole.SYSTEM -> "system"
     }

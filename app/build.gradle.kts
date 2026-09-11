@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.aichat"
         minSdk = 29
         targetSdk = 36
-        versionCode = 33
-        versionName = "1.6.10"
+        versionCode = 34
+        versionName = "1.7.0"
 
         // The public GitHub Releases manifest is the default. A build can
         // override it with -PUPDATE_MANIFEST_URL=... for a private endpoint.
