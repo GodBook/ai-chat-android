@@ -529,6 +529,19 @@ class MainViewModel(
         }
     }
 
+    fun reorderConversationsInGroup(orderedIds: List<String>) {
+        if (orderedIds.size <= 1) return
+        viewModelScope.launch {
+            try {
+                repository.reorderConversationsInGroup(orderedIds)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                transientMessage.value = failure.userFacingMessage()
+            }
+        }
+    }
+
     fun deleteConversations(ids: Set<String>) {
         if (ids.isEmpty()) return
         val currentSelectedId = selectedConversationId.value

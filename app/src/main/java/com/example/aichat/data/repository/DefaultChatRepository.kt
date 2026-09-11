@@ -629,6 +629,17 @@ class DefaultChatRepository(
         }
     }
 
+    override suspend fun reorderConversationsInGroup(orderedConversationIds: List<String>): Boolean {
+        if (orderedConversationIds.isEmpty()) return true
+        return withContext(Dispatchers.IO) {
+            val orders = orderedConversationIds.mapIndexed { index, id ->
+                normalizeConversationId(id) to (index + 1)
+            }
+            conversationDao.updateSortOrders(orders)
+            true
+        }
+    }
+
     override suspend fun deleteConversation(conversationId: String): Boolean {
         val id = normalizeConversationId(conversationId)
         awaitActiveRequestIfNeeded(id)

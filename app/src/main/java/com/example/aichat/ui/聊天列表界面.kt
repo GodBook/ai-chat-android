@@ -3,10 +3,14 @@ package com.example.aichat.ui
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,16 +18,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -78,11 +85,19 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -92,6 +107,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
@@ -104,6 +120,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.delay
+import java.util.Locale
 import com.example.aichat.data.model.ChatConversation
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.DEFAULT_GROUP_NAME
@@ -133,6 +152,7 @@ internal fun ContactsScreen(
     onToggleGroupCollapsed: (String) -> Unit = {},
     onTogglePinConversation: (String) -> Unit = {},
     onSetConversationIcon: (String, String?) -> Unit = { _, _ -> },
+    onReorderConversationsInGroup: (List<String>) -> Unit = {},
     onTemporaryConversation: () -> Unit = {},
     onOpenSettings: () -> Unit,
     deepSearchResults: List<MessageSearchResultItem> = emptyList(),
@@ -155,7 +175,55 @@ internal fun ContactsScreen(
     var selectedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
     var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showBatchGroupDialog by rememberSaveable { mutableStateOf(false) }
-    val visibleConversations = filterConversations(conversations, previews, searchQuery)
+
+    var pendingDeleteConversation by remember { mutableStateOf<ChatConversation?>(null) }
+    var undoRemainingMillis by remember { mutableLongStateOf(2000L) }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var localGroupOrders by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    val haptic = LocalHapticFeedback.current
+
+    val commitPendingDelete: () -> Unit = {
+        pendingDeleteConversation?.let { pending ->
+            onDeleteConversation(pending.id)
+            pendingDeleteConversation = null
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            commitPendingDelete()
+        }
+    }
+
+    LaunchedEffect(pendingDeleteConversation) {
+        val pending = pendingDeleteConversation ?: return@LaunchedEffect
+        val startTime = System.currentTimeMillis()
+        while (true) {
+            val elapsed = System.currentTimeMillis() - startTime
+            val remaining = 2000L - elapsed
+            if (remaining <= 0) {
+                undoRemainingMillis = 0L
+                onDeleteConversation(pending.id)
+                pendingDeleteConversation = null
+                break
+            }
+            undoRemainingMillis = remaining
+            delay(50L)
+        }
+    }
+
+    val onQuickDelete: (ChatConversation) -> Unit = { target ->
+        commitPendingDelete()
+        pendingDeleteConversation = target
+        undoRemainingMillis = 2000L
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+
+    val visibleConversations = remember(conversations, previews, searchQuery, pendingDeleteConversation) {
+        filterConversations(conversations, previews, searchQuery)
+            .filter { it.id != pendingDeleteConversation?.id }
+    }
     val existingGroups = remember(conversations) {
         conversations.mapNotNull { it.groupName?.trim()?.takeIf { g -> g.isNotEmpty() } }.distinct()
     }
@@ -321,142 +389,320 @@ internal fun ContactsScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        if (conversations.isEmpty()) {
-            Box(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("正在准备聊天列表…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else if (visibleConversations.isEmpty() && deepSearchResults.isEmpty() && !isDeepSearching) {
-            Box(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(if (searchQuery.isNotBlank()) "没有匹配的聊天或消息" else "没有匹配的聊天", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-
-            val groupedConversations = remember(visibleConversations) {
-                val namedGroups = visibleConversations
-                    .mapNotNull { it.groupName?.trim()?.takeIf { g -> g.isNotEmpty() } }
-                    .distinct()
-                val result = mutableListOf<Pair<String, List<ChatConversation>>>()
-                namedGroups.forEach { name ->
-                    result.add(name to visibleConversations.filter { it.groupName?.trim() == name })
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            if (conversations.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("正在准备聊天列表…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                val ungrouped = visibleConversations.filter { it.groupName.isNullOrBlank() }
-                if (ungrouped.isNotEmpty()) {
-                    result.add(DEFAULT_GROUP_NAME to ungrouped)
+            } else if (visibleConversations.isEmpty() && deepSearchResults.isEmpty() && !isDeepSearching) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (searchQuery.isNotBlank()) "没有匹配的聊天或消息" else "没有匹配的聊天", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                result
-            }
-
-            LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                groupedConversations.forEach { (groupName, convList) ->
-                    val isCollapsed = groupName in collapsedGroups && searchQuery.isBlank()
-                    val isDefaultGroup = groupName == DEFAULT_GROUP_NAME
-
-                    item(key = "header_$groupName") {
-                        ConversationGroupHeader(
-                            groupName = groupName,
-                            count = convList.size,
-                            isCollapsed = isCollapsed,
-                            onToggleCollapse = { onToggleGroupCollapsed(groupName) },
-                            onRenameGroup = if (!isDefaultGroup) {
-                                { renameGroupTarget = groupName }
-                            } else null,
-                            onDissolveGroup = if (!isDefaultGroup) {
-                                { onSetConversationsGroup(convList.map { it.id }.toSet(), null) }
-                            } else null,
-                        )
+            } else {
+                val groupedConversations = remember(visibleConversations) {
+                    val namedGroups = visibleConversations
+                        .mapNotNull { it.groupName?.trim()?.takeIf { g -> g.isNotEmpty() } }
+                        .distinct()
+                    val result = mutableListOf<Pair<String, List<ChatConversation>>>()
+                    namedGroups.forEach { name ->
+                        result.add(name to visibleConversations.filter { it.groupName?.trim() == name })
                     }
+                    val ungrouped = visibleConversations.filter { it.groupName.isNullOrBlank() }
+                    if (ungrouped.isNotEmpty()) {
+                        result.add(DEFAULT_GROUP_NAME to ungrouped)
+                    }
+                    result
+                }
 
-                    if (!isCollapsed) {
-                        items(convList, key = { it.id }) { conversation ->
-                            Box(modifier = Modifier.animateItem()) {
-                                ConversationRow(
-                                    conversation = conversation,
-                                    preview = previews[conversation.id],
-                                    selected = conversation.id == selectedConversationId,
-                                    isSelectionMode = isSelectionMode,
-                                    isChecked = conversation.id in selectedIds,
-                                    onToggleCheck = {
-                                        selectedIds = if (conversation.id in selectedIds) {
-                                            selectedIds - conversation.id
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    groupedConversations.forEach { (groupName, convList) ->
+                        val isCollapsed = groupName in collapsedGroups && searchQuery.isBlank()
+                        val isDefaultGroup = groupName == DEFAULT_GROUP_NAME
+
+                        item(key = "header_$groupName") {
+                            ConversationGroupHeader(
+                                groupName = groupName,
+                                count = convList.size,
+                                isCollapsed = isCollapsed,
+                                onToggleCollapse = { onToggleGroupCollapsed(groupName) },
+                                onRenameGroup = if (!isDefaultGroup) {
+                                    { renameGroupTarget = groupName }
+                                } else null,
+                                onDissolveGroup = if (!isDefaultGroup) {
+                                    { onSetConversationsGroup(convList.map { it.id }.toSet(), null) }
+                                } else null,
+                            )
+                        }
+
+                        if (!isCollapsed) {
+                            val orderedConvList = run {
+                                val customOrder = localGroupOrders[groupName]
+                                if (customOrder != null) {
+                                    val map = convList.associateBy { it.id }
+                                    customOrder.mapNotNull { map[it] } + convList.filter { it.id !in customOrder }
+                                } else {
+                                    convList
+                                }
+                            }
+
+                            items(orderedConvList, key = { it.id }) { conversation ->
+                                val dismissState = rememberSwipeToDismissBoxState(
+                                    confirmValueChange = { value ->
+                                        if (value == SwipeToDismissBoxValue.EndToStart) {
+                                            onQuickDelete(conversation)
+                                            true
                                         } else {
-                                            selectedIds + conversation.id
+                                            false
                                         }
                                     },
-                                    onClick = { onOpenChat(conversation.id) },
-                                    onLongClick = {
-                                        isSelectionMode = true
-                                        selectedIds = setOf(conversation.id)
+                                )
+
+                                val isDragging = draggingId == conversation.id
+                                val canDrag = orderedConvList.size > 1 && !isSelectionMode && searchQuery.isBlank()
+                                val dragHandleModifier = if (canDrag) {
+                                    Modifier.pointerInput(conversation.id, groupName) {
+                                        detectVerticalDragGestures(
+                                            onDragStart = {
+                                                draggingId = conversation.id
+                                                dragOffset = 0f
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragEnd = {
+                                                val currentOrder = localGroupOrders[groupName] ?: orderedConvList.map { it.id }
+                                                onReorderConversationsInGroup(currentOrder)
+                                                draggingId = null
+                                                dragOffset = 0f
+                                            },
+                                            onDragCancel = {
+                                                draggingId = null
+                                                dragOffset = 0f
+                                            },
+                                            onVerticalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragOffset += dragAmount
+                                                val currentList = (localGroupOrders[groupName] ?: orderedConvList.map { it.id }).toMutableList()
+                                                val currentIndex = currentList.indexOf(conversation.id)
+                                                if (currentIndex >= 0) {
+                                                    val itemHeightPx = 76.dp.toPx()
+                                                    val targetIndex = (currentIndex + (dragOffset / itemHeightPx).toInt()).coerceIn(0, currentList.lastIndex)
+                                                    if (targetIndex != currentIndex) {
+                                                        currentList.removeAt(currentIndex)
+                                                        currentList.add(targetIndex, conversation.id)
+                                                        localGroupOrders = localGroupOrders + (groupName to currentList)
+                                                        dragOffset -= (targetIndex - currentIndex) * itemHeightPx
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                }
+                                            },
+                                        )
+                                    }
+                                } else Modifier
+
+                                Box(
+                                    modifier = Modifier
+                                        .animateItem()
+                                        .zIndex(if (isDragging) 10f else 1f)
+                                        .graphicsLayer {
+                                            if (isDragging) {
+                                                translationY = dragOffset
+                                                scaleX = 1.02f
+                                                scaleY = 1.02f
+                                                shadowElevation = 8.dp.toPx()
+                                            }
+                                        },
+                                ) {
+                                    SwipeToDismissBox(
+                                        state = dismissState,
+                                        enableDismissFromStartToEnd = false,
+                                        enableDismissFromEndToStart = !isSelectionMode && draggingId == null,
+                                        backgroundContent = {
+                                            val color by animateColorAsState(
+                                                targetValue = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
+                                                    MaterialTheme.colorScheme.errorContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                                },
+                                                label = "swipeBg",
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 12.dp)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(color)
+                                                    .padding(end = 20.dp),
+                                                contentAlignment = Alignment.CenterEnd,
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.DeleteOutline,
+                                                    contentDescription = "快速删除",
+                                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                                    modifier = Modifier.size(24.dp),
+                                                )
+                                            }
+                                        },
+                                    ) {
+                                        ConversationRow(
+                                            conversation = conversation,
+                                            preview = previews[conversation.id],
+                                            selected = conversation.id == selectedConversationId,
+                                            isSelectionMode = isSelectionMode,
+                                            isChecked = conversation.id in selectedIds,
+                                            canDrag = canDrag,
+                                            dragHandleModifier = dragHandleModifier,
+                                            onToggleCheck = {
+                                                selectedIds = if (conversation.id in selectedIds) {
+                                                    selectedIds - conversation.id
+                                                } else {
+                                                    selectedIds + conversation.id
+                                                }
+                                            },
+                                            onClick = {
+                                                commitPendingDelete()
+                                                onOpenChat(conversation.id)
+                                            },
+                                            onLongClick = {
+                                                commitPendingDelete()
+                                                isSelectionMode = true
+                                                selectedIds = setOf(conversation.id)
+                                            },
+                                            onRename = {
+                                                commitPendingDelete()
+                                                titleDraft = conversation.title
+                                                renameTarget = conversation
+                                            },
+                                            onSetGroup = {
+                                                commitPendingDelete()
+                                                setGroupTarget = conversation
+                                            },
+                                            onDelete = {
+                                                commitPendingDelete()
+                                                deleteTarget = conversation
+                                            },
+                                            onSetIcon = {
+                                                commitPendingDelete()
+                                                iconTarget = conversation
+                                            },
+                                            onExport = {
+                                                commitPendingDelete()
+                                                onExportConversation(conversation.id)
+                                            },
+                                            onTogglePin = {
+                                                commitPendingDelete()
+                                                onTogglePinConversation(conversation.id)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (searchQuery.isNotBlank()) {
+                        if (isDeepSearching) {
+                            item(key = "deep_search_loading") {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "🔍 正在进行跨会话全文检索…",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                        if (deepSearchResults.isNotEmpty()) {
+                            item(key = "deep_search_header") {
+                                Text(
+                                    text = "消息全文匹配 (${deepSearchResults.size} 条)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                )
+                            }
+                            items(deepSearchResults, key = { "msg_search_${it.id}" }) { resultItem ->
+                                MessageSearchResultRow(
+                                    item = resultItem,
+                                    keyword = searchQuery,
+                                    onClick = {
+                                        commitPendingDelete()
+                                        searchQuery = ""
+                                        searchOpen = false
+                                        onDeepSearchQueryChange("")
+                                        onJumpToMessage(resultItem.conversationId, resultItem.id)
                                     },
-                                    onRename = {
-                                        titleDraft = conversation.title
-                                        renameTarget = conversation
-                                    },
-                                    onSetGroup = {
-                                        setGroupTarget = conversation
-                                    },
-                                    onDelete = { deleteTarget = conversation },
-                                    onSetIcon = { iconTarget = conversation },
-                                    onExport = { onExportConversation(conversation.id) },
-                                    onTogglePin = { onTogglePinConversation(conversation.id) },
                                 )
                             }
                         }
                     }
                 }
+            }
 
-                if (searchQuery.isNotBlank()) {
-                    if (isDeepSearching) {
-                        item(key = "deep_search_loading") {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "🔍 正在进行跨会话全文检索…",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
-                    if (deepSearchResults.isNotEmpty()) {
-                        item(key = "deep_search_header") {
+            // 2s Undo deletion popup in bottom-right corner!
+            AnimatedVisibility(
+                visible = pendingDeleteConversation != null,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = if (isSelectionMode) 88.dp else 18.dp)
+                    .navigationBarsPadding(),
+            ) {
+                pendingDeleteConversation?.let {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        tonalElevation = 8.dp,
+                        shadowElevation = 6.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp),
+                            )
                             Text(
-                                text = "消息全文匹配 (${deepSearchResults.size} 条)",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                text = "已删除 (${String.format(Locale.US, "%.1f", undoRemainingMillis / 1000f)}s)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
-                        }
-                        items(deepSearchResults, key = { "msg_search_${it.id}" }) { resultItem ->
-                            MessageSearchResultRow(
-                                item = resultItem,
-                                keyword = searchQuery,
+                            Button(
                                 onClick = {
-                                    searchQuery = ""
-                                    searchOpen = false
-                                    onDeepSearchQueryChange("")
-                                    onJumpToMessage(resultItem.conversationId, resultItem.id)
+                                    pendingDeleteConversation = null
                                 },
-                            )
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp),
+                            ) {
+                                Text("撤回", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
         }
     }
+
 
 
     iconTarget?.let { target ->
@@ -580,6 +826,8 @@ private fun ConversationRow(
     selected: Boolean,
     isSelectionMode: Boolean,
     isChecked: Boolean,
+    canDrag: Boolean = false,
+    dragHandleModifier: Modifier = Modifier,
     onToggleCheck: () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -720,6 +968,16 @@ private fun ConversationRow(
                                 Icon(
                                     Icons.Default.MoreVert,
                                     contentDescription = "${conversation.title}的聊天操作",
+                                )
+                            }
+                            if (canDrag) {
+                                Icon(
+                                    Icons.Default.DragHandle,
+                                    contentDescription = "按住拖动排序",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                    modifier = dragHandleModifier
+                                        .size(28.dp)
+                                        .padding(horizontal = 2.dp, vertical = 4.dp),
                                 )
                             }
                         }

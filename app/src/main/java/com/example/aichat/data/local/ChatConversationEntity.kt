@@ -9,6 +9,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["updatedAt"]),
         Index(value = ["isPinned", "updatedAt"]),
+        Index(value = ["sortOrder"]),
     ],
 )
 data class ChatConversationEntity(
@@ -22,4 +23,5 @@ data class ChatConversationEntity(
     val personaId: String? = null,
     val providerProfileId: String? = null,
     val contextWindowLimit: Int = 8,
+    val sortOrder: Int = 0,
 )

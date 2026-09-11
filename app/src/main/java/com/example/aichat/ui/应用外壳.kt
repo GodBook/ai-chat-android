@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -94,10 +95,14 @@ fun AiChatApp(viewModel: MainViewModel) {
             viewModel.clearMessage()
         }
     }
-
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets.navigationBars,
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.navigationBarsPadding(),
+            )
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         NavHost(
             navController = navController,
@@ -168,6 +173,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onToggleGroupCollapsed = viewModel::toggleGroupCollapsed,
                     onTogglePinConversation = viewModel::togglePinConversation,
                     onSetConversationIcon = viewModel::setConversationIcon,
+                    onReorderConversationsInGroup = viewModel::reorderConversationsInGroup,
                     onTemporaryConversation = { viewModel.startTemporaryConversation { navController.navigate(Routes.TEMPORARY) } },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     deepSearchResults = state.deepSearchResults,

@@ -20,7 +20,7 @@ import kotlinx.serialization.json.Json
         ChatPersonaEntity::class,
         ProviderProfileEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -185,6 +185,13 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `chat_conversations` ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_conversations_sortOrder` ON `chat_conversations` (`sortOrder`)")
+            }
+        }
+
         private fun insertDefaultSeedData(database: SupportSQLiteDatabase) {
             for (persona in BUILT_IN_PERSONAS) {
                 database.execSQL(
@@ -224,8 +231,8 @@ abstract class ChatDatabase : RoomDatabase() {
                 val now = System.currentTimeMillis()
                 database.execSQL(
                     "INSERT OR IGNORE INTO `chat_conversations` " +
-                        "(`id`, `title`, `createdAt`, `updatedAt`, `isPinned`, `contextWindowLimit`) VALUES (?, ?, ?, ?, ?, ?)",
-                    arrayOf<Any>(DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE, now, now, 0, 8),
+                        "(`id`, `title`, `createdAt`, `updatedAt`, `isPinned`, `contextWindowLimit`, `sortOrder`) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    arrayOf<Any>(DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE, now, now, 0, 8, 0),
                 )
                 insertDefaultSeedData(database)
             }
@@ -250,6 +257,7 @@ abstract class ChatDatabase : RoomDatabase() {
                         MIGRATION_6_7,
                         MIGRATION_7_8,
                         MIGRATION_8_9,
+                        MIGRATION_9_10,
                     )
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()

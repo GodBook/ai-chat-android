@@ -21,4 +21,5 @@ data class ChatConversation(
     val personaId: String? = null,
     val providerProfileId: String? = null,
     val contextWindowLimit: Int = 8,
+    val sortOrder: Int = 0,
 )

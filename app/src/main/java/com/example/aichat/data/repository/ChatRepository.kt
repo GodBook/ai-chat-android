@@ -71,6 +71,8 @@ interface ChatRepository {
 
     suspend fun renameGroup(oldGroupName: String, newGroupName: String): Int = 0
 
+    suspend fun reorderConversationsInGroup(orderedConversationIds: List<String>): Boolean = false
+
     suspend fun deleteConversation(conversationId: String): Boolean = false
  
     suspend fun deleteConversations(conversationIds: Collection<String>): Int = 0

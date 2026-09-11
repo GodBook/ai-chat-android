@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -82,6 +83,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -425,6 +428,11 @@ private fun ScreenshotTriggerSettings(
     }
 }
 
+private data class SettingsTabItem(
+    val title: String,
+    val icon: ImageVector,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsScreen(
@@ -699,33 +707,153 @@ internal fun SettingsScreen(
 
     BackHandler(onBack = { handleExit() })
 
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) onExportBackup(uri)
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) onImportBackup(uri)
+    }
+    var showAdvancedUpdate by rememberSaveable { mutableStateOf(false) }
+    var showReleaseHistory by rememberSaveable { mutableStateOf(false) }
+
+    val tabs = remember {
+        listOf(
+            SettingsTabItem("模型服务", Icons.Default.Tune),
+            SettingsTabItem("对话偏好", Icons.Default.AutoAwesome),
+            SettingsTabItem("截图助手", Icons.Default.SmartToy),
+            SettingsTabItem("数据关于", Icons.Default.FolderZip),
+        )
+    }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val scrollStateTab0 = rememberScrollState()
+    val scrollStateTab1 = rememberScrollState()
+    val scrollStateTab2 = rememberScrollState()
+    val scrollStateTab3 = rememberScrollState()
+    var personasExpanded by rememberSaveable { mutableStateOf(false) }
+    var profilesExpanded by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text("设置", fontWeight = FontWeight.SemiBold)
-                },
-                navigationIcon = {
-                    IconButton(onClick = { handleExit() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            Column {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text("设置", fontWeight = FontWeight.SemiBold)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { handleExit() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ) {
+                    tabs.forEachIndexed { index, tab ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = { Text(tab.title, style = MaterialTheme.typography.labelMedium) },
+                            icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        )
                     }
-                },
-            )
+                }
+            }
+        },
+        bottomBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    error?.let {
+                        Text(
+                            text = it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (saved) {
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("已保存", style = MaterialTheme.typography.labelSmall) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                                },
+                                modifier = Modifier.height(38.dp),
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch { performSave() }
+                            },
+                            enabled = !saving && !updatingOverlayAppearance,
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            if (saving) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("保存中…")
+                            } else {
+                                Text("保存设置", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        if (state.hasApiKey) {
+                            OutlinedButton(
+                                onClick = { showDeleteKeyConfirmation = true },
+                                enabled = !saving,
+                                modifier = Modifier.height(40.dp),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text("删除密钥")
+                            }
+                        }
+                    }
+                }
+            }
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .padding(padding)
-                .padding(horizontal = 16.dp)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .fillMaxSize(),
         ) {
-            Spacer(Modifier.height(4.dp))
-
-            // 1. 模型与接口卡片
-            SettingsCard {
+            when (selectedTab) {
+                0 -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollStateTab0)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        // 1. 模型与接口卡片
+                        SettingsCard {
                 SettingsCardHeader(
                     icon = Icons.Default.Tune,
                     title = "模型与接口",
@@ -915,7 +1043,12 @@ internal fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    for (profile in state.providerProfiles) {
+                    val visibleProfiles = if (profilesExpanded || state.providerProfiles.size <= 3) {
+                        state.providerProfiles
+                    } else {
+                        state.providerProfiles.take(3)
+                    }
+                    for (profile in visibleProfiles) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
@@ -1004,6 +1137,20 @@ internal fun SettingsScreen(
                             }
                         }
                     }
+                    if (state.providerProfiles.size > 3) {
+                        TextButton(
+                            onClick = { profilesExpanded = !profilesExpanded },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                if (profilesExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (profilesExpanded) "收起预设列表" else "展开全部服务商预设 (${state.providerProfiles.size})")
+                        }
+                    }
                 }
 
                 OutlinedButton(
@@ -1043,7 +1190,12 @@ internal fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    for (persona in state.personas) {
+                    val visiblePersonas = if (personasExpanded || state.personas.size <= 3) {
+                        state.personas
+                    } else {
+                        state.personas.take(3)
+                    }
+                    for (persona in visiblePersonas) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
@@ -1139,6 +1291,20 @@ internal fun SettingsScreen(
                             }
                         }
                     }
+                    if (state.personas.size > 3) {
+                        TextButton(
+                            onClick = { personasExpanded = !personasExpanded },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                if (personasExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (personasExpanded) "收起角色列表" else "展开全部角色面具 (${state.personas.size})")
+                        }
+                    }
                 }
 
                 OutlinedButton(
@@ -1163,8 +1329,19 @@ internal fun SettingsScreen(
                 }
             }
 
-            // 4. 主题颜色卡片
-            SettingsCard {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+    1 -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollStateTab1)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // 主题颜色卡片
+                    SettingsCard {
                 SettingsCardHeader(
                     icon = Icons.Default.Palette,
                     title = "主题颜色",
@@ -1279,8 +1456,19 @@ internal fun SettingsScreen(
 
             WebSearchSettingsCard()
 
-            // 3. 后台截屏助手卡片
-            SettingsCard {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+    2 -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollStateTab2)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // 后台截屏助手卡片
+                    SettingsCard {
                 SettingsCardHeader(
                     icon = Icons.Default.SmartToy,
                     title = "后台截图助手",
@@ -1538,19 +1726,19 @@ internal fun SettingsScreen(
                 }
             }
 
-            // 4. 数据与存储卡片
-            val exportLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.CreateDocument("application/zip"),
-            ) { uri ->
-                if (uri != null) onExportBackup(uri)
-            }
-            val importLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument(),
-            ) { uri ->
-                if (uri != null) onImportBackup(uri)
-            }
-
-            SettingsCard {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+    3 -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollStateTab3)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // 数据与存储卡片
+                    SettingsCard {
                 SettingsCardHeader(
                     icon = Icons.Default.FolderZip,
                     title = "数据与存储",
@@ -1692,10 +1880,6 @@ internal fun SettingsScreen(
             }
 
             // 5. 关于与更新卡片
-            var showAdvancedUpdate by rememberSaveable { mutableStateOf(false) }
-            var showReleaseHistory by rememberSaveable { mutableStateOf(false) }
-            if (showReleaseHistory) ReleaseHistoryDialog(onDismiss = { showReleaseHistory = false })
-
             SettingsCard {
                 Text("版本更新", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Row(
@@ -1847,55 +2031,21 @@ internal fun SettingsScreen(
                 }
             }
 
-            // 底部操作区与保存
-            error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-            }
-            if (saved) {
-                AssistChip(
-                    onClick = {},
-                    label = { Text("设置已保存") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Button(
-                    onClick = {
-                        scope.launch { performSave() }
-                    },
-                    enabled = !saving && !updatingOverlayAppearance,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                ) {
-                    if (saving) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Text("保存设置")
-                    }
-                }
-                if (state.hasApiKey) {
-                    OutlinedButton(
-                        onClick = { showDeleteKeyConfirmation = true },
-                        enabled = !saving,
-                        shape = RoundedCornerShape(10.dp),
-                    ) {
-                        Text("删除密钥")
-                    }
+                    Text(
+                        "聊天记录和设置保存在本机。通过同一签名安装新版 APK 时，Android 会保留原有数据。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(16.dp))
                 }
             }
-            Text(
-                "聊天记录和设置保存在本机。通过同一签名安装新版 APK 时，Android 会保留原有数据。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
         }
     }
+}
+
+if (showReleaseHistory) {
+    ReleaseHistoryDialog(onDismiss = { showReleaseHistory = false })
+}
 
     when (val update = state.updateState) {
         is UpdateUiState.Available -> AlertDialog(

@@ -61,6 +61,7 @@ internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversat
     personaId = personaId,
     providerProfileId = providerProfileId,
     contextWindowLimit = contextWindowLimit,
+    sortOrder = sortOrder,
 )
 
 internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversationEntity(
@@ -74,6 +75,7 @@ internal fun ChatConversation.toEntity(): ChatConversationEntity = ChatConversat
     personaId = personaId,
     providerProfileId = providerProfileId,
     contextWindowLimit = contextWindowLimit,
+    sortOrder = sortOrder,
 )
 
 internal fun ChatPersonaEntity.toDomain(): ChatPersona = ChatPersona(
