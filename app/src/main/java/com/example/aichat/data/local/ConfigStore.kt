@@ -48,6 +48,7 @@ class ConfigStore(context: Context) {
             screenshotTrigger = normalizeScreenshotTrigger(preferences[SCREENSHOT_TRIGGER]),
             autoCollapseThinking = preferences[AUTO_COLLAPSE_THINKING] ?: true,
             themeColor = preferences[THEME_COLOR] ?: DEFAULT_THEME_COLOR,
+            defaultWebSearchEnabled = preferences[DEFAULT_WEB_SEARCH_ENABLED] ?: false,
         )
     }
 
@@ -70,6 +71,7 @@ class ConfigStore(context: Context) {
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
         autoCollapseThinking: Boolean = true,
         themeColor: String = DEFAULT_THEME_COLOR,
+        defaultWebSearchEnabled: Boolean = false,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -84,6 +86,7 @@ class ConfigStore(context: Context) {
             preferences[SCREENSHOT_TRIGGER] = screenshotTrigger.storageKey
             preferences[AUTO_COLLAPSE_THINKING] = autoCollapseThinking
             preferences[THEME_COLOR] = themeColor
+            preferences[DEFAULT_WEB_SEARCH_ENABLED] = defaultWebSearchEnabled
         }
     }
 
@@ -100,7 +103,13 @@ class ConfigStore(context: Context) {
         screenshotTrigger = config.screenshotTrigger,
         autoCollapseThinking = config.autoCollapseThinking,
         themeColor = config.themeColor,
+        defaultWebSearchEnabled = config.defaultWebSearchEnabled,
     )
+
+    /** Updates default web search enabled immediately. */
+    suspend fun updateDefaultWebSearchEnabled(enabled: Boolean) {
+        dataStore.edit { preferences -> preferences[DEFAULT_WEB_SEARCH_ENABLED] = enabled }
+    }
 
     /** Updates app theme color immediately. */
     suspend fun updateThemeColor(themeColor: String) {
@@ -167,5 +176,6 @@ class ConfigStore(context: Context) {
         val AUTO_COLLAPSE_THINKING = booleanPreferencesKey("auto_collapse_thinking")
         val THEME_COLOR = stringPreferencesKey("theme_color")
         val COLLAPSED_GROUPS = stringSetPreferencesKey("collapsed_groups")
+        val DEFAULT_WEB_SEARCH_ENABLED = booleanPreferencesKey("default_web_search_enabled")
     }
 }

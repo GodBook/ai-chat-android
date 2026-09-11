@@ -14,7 +14,7 @@ android {
         applicationId = "com.example.aichat"
         minSdk = 29
         targetSdk = 36
-        versionCode = 27
+        versionCode = 28
         versionName = "1.6.5"
 
         // The public GitHub Releases manifest is the default. A build can

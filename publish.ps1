@@ -240,7 +240,9 @@ if (-not $SkipGitPush) {
 
     $existingTag = git tag -l "$tag"
     if ($existingTag) {
-        Write-Host "[GIT] Tag $tag already exists, skipping tag creation." -ForegroundColor Yellow
+        Write-Host "[GIT] Tag $tag already exists, updating to current commit..." -ForegroundColor Yellow
+        git tag -f "$tag"
+        git push origin "$tag" --force
     } else {
         git tag "$tag"
         git push origin "$tag"

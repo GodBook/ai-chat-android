@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SmartToy
@@ -440,6 +441,7 @@ internal fun SettingsScreen(
     onModelPresetSelected: suspend (ModelPreset) -> Result<Unit>,
     onScreenshotTriggerChanged: suspend (ScreenshotTrigger) -> Result<Unit>,
     onThemeColorChanged: suspend (String) -> Result<Unit> = { Result.success(Unit) },
+    onDefaultWebSearchEnabledChanged: suspend (Boolean) -> Result<Unit> = { Result.success(Unit) },
     onDeleteKey: () -> Unit,
     onCheckUpdate: (String?) -> Unit,
     onDownloadUpdate: (com.example.aichat.data.update.AppUpdateInfo) -> Unit,
@@ -486,6 +488,9 @@ internal fun SettingsScreen(
     var screenshotTrigger by rememberSaveable(state.config.screenshotTrigger) {
         mutableStateOf(state.config.screenshotTrigger)
     }
+    var defaultWebSearchEnabled by rememberSaveable(state.config.defaultWebSearchEnabled) {
+        mutableStateOf(state.config.defaultWebSearchEnabled)
+    }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -496,6 +501,7 @@ internal fun SettingsScreen(
     var updatingShortAnswerMode by remember { mutableStateOf(false) }
     var updatingAutoFallback by remember { mutableStateOf(false) }
     var updatingScreenshotTrigger by remember { mutableStateOf(false) }
+    var updatingDefaultWebSearch by remember { mutableStateOf(false) }
     var showDeleteKeyConfirmation by rememberSaveable { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
     var pendingBackgroundEnable by remember { mutableStateOf<Boolean?>(null) }
@@ -891,7 +897,7 @@ internal fun SettingsScreen(
                 SettingsCardHeader(
                     icon = Icons.Default.AutoAwesome,
                     title = "对话偏好",
-                    subtitle = "多模态视觉与思维链展示设置",
+                    subtitle = "多模态视觉、思维链与联网搜索设置",
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -936,6 +942,46 @@ internal fun SettingsScreen(
                                     .onFailure {
                                         error = it.message ?: "保存设置失败"
                                     }
+                            }
+                        },
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("默认启用联网搜索", fontWeight = FontWeight.Medium)
+                        Text(
+                            "发送新消息时默认检索实时网页信息（也可在聊天输入框左侧随时切换）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = defaultWebSearchEnabled,
+                        enabled = !saving && !updatingDefaultWebSearch,
+                        onCheckedChange = { enabled ->
+                            val previous = defaultWebSearchEnabled
+                            defaultWebSearchEnabled = enabled
+                            saved = false
+                            updatingDefaultWebSearch = true
+                            scope.launch {
+                                try {
+                                    onDefaultWebSearchEnabledChanged(enabled)
+                                        .onSuccess {
+                                            error = null
+                                            saved = true
+                                        }
+                                        .onFailure {
+                                            defaultWebSearchEnabled = previous
+                                            error = it.message ?: "联网搜索设置保存失败"
+                                        }
+                                } finally {
+                                    updatingDefaultWebSearch = false
+                                }
                             }
                         },
                     )

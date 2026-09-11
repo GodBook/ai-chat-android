@@ -161,6 +161,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     },
                     onExportMarkdown = { viewModel.exportMarkdown(context) },
                     onExportImage = { includeThinking -> viewModel.exportImage(context, includeThinking) },
+                    onToggleWebSearch = viewModel::toggleWebSearch,
                 )
             }
             composable(Routes.SETTINGS) {
@@ -227,6 +228,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onModelPresetSelected = viewModel::selectModelPreset,
                     onScreenshotTriggerChanged = viewModel::setScreenshotTrigger,
                     onThemeColorChanged = viewModel::setThemeColor,
+                    onDefaultWebSearchEnabledChanged = viewModel::setDefaultWebSearchEnabled,
                     onDeleteKey = viewModel::deleteApiKey,
                     onCheckUpdate = viewModel::checkForUpdate,
                     onDownloadUpdate = viewModel::downloadUpdate,

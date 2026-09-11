@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -129,6 +130,7 @@ internal fun ChatScreen(
     onExport: () -> Unit,
     onExportMarkdown: () -> Unit = {},
     onExportImage: (Boolean) -> Unit = {},
+    onToggleWebSearch: () -> Unit = {},
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -347,6 +349,7 @@ internal fun ChatScreen(
                 draft = draft,
                 selectedImages = state.selectedImagePaths,
                 isWorking = state.isWorking,
+                webSearchActive = state.webSearchActive,
                 onDraftChange = { draft = it },
                 onPickImage = {
                     picker.launch(
@@ -354,6 +357,7 @@ internal fun ChatScreen(
                     )
                 },
                 onRemoveImage = onRemoveImage,
+                onToggleWebSearch = onToggleWebSearch,
                 onSend = {
                     onSend(draft)
                     draft = ""
@@ -498,9 +502,11 @@ private fun Composer(
     draft: String,
     selectedImages: List<String>,
     isWorking: Boolean,
+    webSearchActive: Boolean,
     onDraftChange: (String) -> Unit,
     onPickImage: () -> Unit,
     onRemoveImage: (String) -> Unit,
+    onToggleWebSearch: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onUsePrompt: (String) -> Unit,
@@ -553,9 +559,25 @@ private fun Composer(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 IconButton(onClick = onPickImage, enabled = !isWorking) {
                     Icon(Icons.Default.AddPhotoAlternate, contentDescription = "选择图片")
+                }
+                IconButton(
+                    onClick = onToggleWebSearch,
+                    enabled = !isWorking,
+                    modifier = if (webSearchActive) {
+                        Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                    } else {
+                        Modifier
+                    },
+                ) {
+                    Icon(
+                        Icons.Default.Language,
+                        contentDescription = if (webSearchActive) "已开启联网搜索（点击关闭）" else "已关闭联网搜索（点击开启）",
+                        tint = if (webSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
                 OutlinedTextField(
                     value = draft,
@@ -640,6 +662,12 @@ private fun MessageBubble(
                             durationMs = message.thinkingDurationMs,
                             autoCollapse = autoCollapseThinking,
                         )
+                        if (message.text.isNotBlank() || !message.webSearchResults.isNullOrEmpty()) Spacer(Modifier.height(10.dp))
+                    }
+
+                    // Web search results card
+                    if (!isUser && !message.webSearchResults.isNullOrEmpty()) {
+                        WebSearchResultsCard(results = message.webSearchResults)
                         if (message.text.isNotBlank()) Spacer(Modifier.height(10.dp))
                     }
 

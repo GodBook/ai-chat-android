@@ -27,6 +27,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
@@ -36,9 +37,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 class DefaultChatRepository(
@@ -47,6 +50,7 @@ class DefaultChatRepository(
     private val apiKeyStore: ApiKeyStore,
     private val imageFileStore: ImageFileStore,
     private val client: OpenAiCompatibleClient,
+    private val webSearchClient: com.example.aichat.data.network.WebSearchClient = com.example.aichat.data.network.WebSearchClient(),
 ) : ChatRepository {
     private val dao: ChatMessageDao = database.chatMessageDao()
     private val conversationDao: ChatConversationDao = database.chatConversationDao()
@@ -92,13 +96,14 @@ class DefaultChatRepository(
     private val activeRequestLock = Any()
     private val requestMutex = Mutex()
 
-    override suspend fun sendMessage(text: String, imagePaths: List<String>): String =
-        sendMessage(DEFAULT_CONVERSATION_ID, text, imagePaths)
+    override suspend fun sendMessage(text: String, imagePaths: List<String>, webSearch: Boolean): String =
+        sendMessage(DEFAULT_CONVERSATION_ID, text, imagePaths, webSearch)
 
     override suspend fun sendMessage(
         conversationId: String,
         text: String,
         imagePaths: List<String>,
+        webSearch: Boolean,
     ): String = withRequestLock {
         val selectedConversationId = normalizeConversationId(conversationId)
         ensureConversation(selectedConversationId)
@@ -113,6 +118,10 @@ class DefaultChatRepository(
                 "请先在设置中开启图片支持",
             )
         }
+
+        val searchResults = if (webSearch && cleanText.isNotEmpty()) {
+            runCatching { webSearchClient.search(cleanText) }.getOrNull()?.takeIf { it.isNotEmpty() }
+        } else null
 
         val requestId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -135,12 +144,23 @@ class DefaultChatRepository(
             requestId = requestId,
             // Keep the assistant after the user even when both are inserted in one transaction.
             createdAt = now + 1,
+            webSearchResults = searchResults,
         )
+        val userRequestMessage = if (searchResults != null) {
+            val searchContext = buildWebSearchPrompt(cleanText, searchResults)
+            ChatRequestMessage(
+                role = MessageRole.USER,
+                text = "$cleanText\n\n$searchContext",
+                imagePaths = imagePaths,
+            )
+        } else {
+            user.toRequestMessage()
+        }
         val history = database.withTransaction {
             val requestHistory = limitContext(dao.getForConversation(selectedConversationId).map { it.toDomain() }
                 .filter { it.status == MessageStatus.SENT }
                 .map { it.toRequestMessage() }
-                .plus(user.toRequestMessage()))
+                .plus(userRequestMessage))
             dao.insertAll(listOf(user.toEntity(), assistant.toEntity()))
             conversationDao.touch(selectedConversationId, now)
             requestHistory
@@ -198,10 +218,20 @@ class DefaultChatRepository(
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
+        val userRequestMessage = if (target.webSearchResults != null) {
+            val searchContext = buildWebSearchPrompt(user.text, target.webSearchResults)
+            ChatRequestMessage(
+                role = MessageRole.USER,
+                text = "${user.text}\n\n$searchContext",
+                imagePaths = user.imagePaths,
+            )
+        } else {
+            user.toRequestMessage()
+        }
         val history = limitContext(all.take(userIndex.coerceAtLeast(0))
             .filter { it.status == MessageStatus.SENT }
             .map { it.toRequestMessage() }
-            .plus(user.toRequestMessage()))
+            .plus(userRequestMessage))
         val pending = target.copy(
             text = "",
             thinkingContent = null,
@@ -239,10 +269,20 @@ class DefaultChatRepository(
             throw ChatClientException(ChatErrorKind.MISSING_CONFIG, "请先在设置中开启图片支持")
         }
         val userIndex = all.indexOfFirst { it.id == user.id }
+        val userRequestMessage = if (target.webSearchResults != null) {
+            val searchContext = buildWebSearchPrompt(user.text, target.webSearchResults)
+            ChatRequestMessage(
+                role = MessageRole.USER,
+                text = "${user.text}\n\n$searchContext",
+                imagePaths = user.imagePaths,
+            )
+        } else {
+            user.toRequestMessage()
+        }
         val history = limitContext(all.take(userIndex.coerceAtLeast(0))
             .filter { it.status == MessageStatus.SENT }
             .map { it.toRequestMessage() }
-            .plus(user.toRequestMessage()))
+            .plus(userRequestMessage))
         val pending = target.copy(
             text = "",
             thinkingContent = null,
@@ -800,6 +840,27 @@ class DefaultChatRepository(
             }
         }
         return kept.toList()
+    }
+
+    private fun buildWebSearchPrompt(
+        query: String,
+        results: List<com.example.aichat.data.network.WebSearchResult>,
+    ): String {
+        val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val formattedResults = results.mapIndexed { index, r ->
+            "[来源 ${index + 1}] ${r.title}\n网址: ${r.url}\n摘要: ${r.snippet}"
+        }.joinToString("\n\n")
+
+        return """
+        [系统实时网络检索]
+        检索日期: $dateStr
+        关键词: $query
+
+        以下为互联网实时检索结果：
+        $formattedResults
+
+        请结合上述检索到的最新信息并根据自身知识回答用户提问。如回答引用了相关事实，请在相应位置适度标明参考来源。
+        """.trimIndent()
     }
 
     private companion object {

@@ -106,6 +106,7 @@ data class MainUiState(
     val storageStats: AppStorageStats? = null,
     val probeState: ProbeUiState = ProbeUiState.Idle,
     val backupRestoreState: BackupRestoreUiState = BackupRestoreUiState.Idle,
+    val webSearchActive: Boolean = false,
 )
 
 private data class ConversationSnapshot(
@@ -131,6 +132,7 @@ private data class ComposerSnapshot(
     val images: List<String>,
     val message: String?,
     val draft: String?,
+    val webSearchActive: Boolean?,
 )
 
 class MainViewModel(
@@ -150,6 +152,7 @@ class MainViewModel(
     private val probeState = MutableStateFlow<ProbeUiState>(ProbeUiState.Idle)
     private val storageStats = MutableStateFlow<AppStorageStats?>(null)
     private val backupRestoreState = MutableStateFlow<BackupRestoreUiState>(BackupRestoreUiState.Idle)
+    private val webSearchActive = MutableStateFlow<Boolean?>(null)
     private val conversationGeneration = AtomicLong(0)
 
     private val conversationSelection: Flow<ConversationSelection> = combine(
@@ -196,7 +199,8 @@ class MainViewModel(
         selectedImagePaths,
         transientMessage,
         draftToRestore,
-    ) { images, message, draft -> ComposerSnapshot(images, message, draft) }
+        webSearchActive,
+    ) { images, message, draft, search -> ComposerSnapshot(images, message, draft, search) }
 
     private val baseUiState: Flow<MainUiState> = combine(
         conversationSnapshot,
@@ -204,6 +208,7 @@ class MainViewModel(
         composerSnapshot,
     ) { conversationsState, settings, composer ->
         val previews = conversationsState.previews.associateBy { it.conversationId }
+        val isWebSearch = composer.webSearchActive ?: settings.config.defaultWebSearchEnabled
         MainUiState(
             conversations = conversationsState.conversations,
             conversationPreviews = previews,
@@ -221,6 +226,7 @@ class MainViewModel(
             draftToRestore = composer.draft,
             updateManifestUrl = settings.updateManifestUrl.ifBlank { BuildConfig.UPDATE_MANIFEST_URL },
             collapsedGroups = settings.collapsedGroups,
+            webSearchActive = isWebSearch,
         )
     }
 
@@ -544,6 +550,11 @@ class MainViewModel(
         deleteComposerImages(listOf(path))
     }
 
+    fun toggleWebSearch(active: Boolean? = null) {
+        val current = uiState.value.webSearchActive
+        webSearchActive.value = active ?: !current
+    }
+
     fun send(text: String) {
         if (uiState.value.isWorking) return
         val images = selectedImagePaths.value
@@ -551,6 +562,7 @@ class MainViewModel(
             transientMessage.value = "请输入消息或选择图片"
             return
         }
+        val isWebSearch = uiState.value.webSearchActive
         val generation = conversationGeneration.get()
         val conversationId = selectedConversationId.value
         draftToRestore.value = null
@@ -562,7 +574,7 @@ class MainViewModel(
                     targetId = it.id
                     selectedConversationId.value = it.id
                 }.id
-                repository.sendMessage(resolvedTargetId, text, images)
+                repository.sendMessage(resolvedTargetId, text, images, webSearch = isWebSearch)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -743,6 +755,11 @@ class MainViewModel(
     /** Persists the auto fallback switch immediately, without saving the rest of the form. */
     suspend fun setAutoFallbackEnabled(enabled: Boolean): Result<Unit> = runCatching {
         configStore.updateAutoFallbackEnabled(enabled)
+    }
+
+    /** Persists the default web search switch immediately. */
+    suspend fun setDefaultWebSearchEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        configStore.updateDefaultWebSearchEnabled(enabled)
     }
 
     /** Persists a model preset choice immediately so picking a chip survives exiting settings. */

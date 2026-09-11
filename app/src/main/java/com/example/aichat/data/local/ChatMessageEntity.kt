@@ -28,4 +28,5 @@ data class ChatMessageEntity(
     val conversationId: String = "default",
     val thinkingContent: String? = null,
     val thinkingDurationMs: Long? = null,
+    val webSearchResults: String? = null,
 )

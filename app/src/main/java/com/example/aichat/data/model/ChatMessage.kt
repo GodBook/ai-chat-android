@@ -155,6 +155,7 @@ data class ChatMessage(
     val conversationId: String = DEFAULT_CONVERSATION_ID,
     val thinkingContent: String? = null,
     val thinkingDurationMs: Long? = null,
+    val webSearchResults: List<com.example.aichat.data.network.WebSearchResult>? = null,
 )
 
 data class ProviderConfig(
@@ -180,6 +181,8 @@ data class ProviderConfig(
     val autoCollapseThinking: Boolean = true,
     /** Theme color for the app interface. */
     val themeColor: String = DEFAULT_THEME_COLOR,
+    /** Whether web search is enabled by default in new conversations. */
+    val defaultWebSearchEnabled: Boolean = false,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

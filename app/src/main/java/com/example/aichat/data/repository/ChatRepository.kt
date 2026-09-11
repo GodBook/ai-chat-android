@@ -4,6 +4,7 @@ import com.example.aichat.data.local.ChatConversationEntity
 import com.example.aichat.data.local.ChatMessageEntity
 import com.example.aichat.data.model.ChatMessage
 import com.example.aichat.data.model.ChatConversation
+import com.example.aichat.data.model.DEFAULT_CONVERSATION_ID
 import com.example.aichat.data.model.DEFAULT_CONVERSATION_TITLE
 import com.example.aichat.data.model.MessageStatus
 import com.example.aichat.data.model.ProviderConfig
@@ -68,14 +69,19 @@ interface ChatRepository {
     suspend fun deleteConversations(conversationIds: Collection<String>): Int = 0
 
     /** Inserts a user message and streams an assistant response. Returns the assistant id. */
-    suspend fun sendMessage(text: String, imagePaths: List<String> = emptyList()): String
+    suspend fun sendMessage(
+        text: String,
+        imagePaths: List<String> = emptyList(),
+        webSearch: Boolean = false,
+    ): String = sendMessage(DEFAULT_CONVERSATION_ID, text, imagePaths, webSearch)
 
     /** Inserts and streams a message in the selected chat. */
     suspend fun sendMessage(
         conversationId: String,
         text: String,
         imagePaths: List<String> = emptyList(),
-    ): String = sendMessage(text, imagePaths)
+        webSearch: Boolean = false,
+    ): String
 
     /** Re-runs the user request associated with a failed or interrupted assistant message. */
     suspend fun retryMessage(messageId: String): String?

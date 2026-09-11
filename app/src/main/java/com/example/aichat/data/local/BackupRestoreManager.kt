@@ -55,6 +55,7 @@ data class BackupMessage(
     val conversationId: String,
     val thinkingContent: String? = null,
     val thinkingDurationMs: Long? = null,
+    val webSearchResults: String? = null,
 )
 
 @Serializable
@@ -135,13 +136,14 @@ object BackupRestoreManager {
                 conversationId = msg.conversationId,
                 thinkingContent = msg.thinkingContent,
                 thinkingDurationMs = msg.thinkingDurationMs,
+                webSearchResults = com.example.aichat.data.model.encodeWebSearchResults(msg.webSearchResults),
             )
         }
 
         val manifest = BackupManifest(
             appVersion = appVersion,
             versionCode = versionCode,
-            schemaVersion = 5,
+            schemaVersion = 6,
             exportedAt = System.currentTimeMillis(),
             conversationCount = backupConversations.size,
             messageCount = backupMessages.size,
@@ -288,6 +290,7 @@ object BackupRestoreManager {
                 errorMessage = msg.errorMessage,
                 thinkingContent = msg.thinkingContent,
                 thinkingDurationMs = msg.thinkingDurationMs,
+                webSearchResults = msg.webSearchResults,
             )
         }
 

@@ -20,6 +20,7 @@ internal fun ChatMessageEntity.toDomain(): ChatMessage = ChatMessage(
     errorMessage = errorMessage,
     thinkingContent = thinkingContent,
     thinkingDurationMs = thinkingDurationMs,
+    webSearchResults = decodeWebSearchResults(webSearchResults),
 )
 
 internal fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
@@ -34,6 +35,7 @@ internal fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
     errorMessage = errorMessage,
     thinkingContent = thinkingContent,
     thinkingDurationMs = thinkingDurationMs,
+    webSearchResults = encodeWebSearchResults(webSearchResults),
 )
 
 internal fun ChatConversationEntity.toDomain(): ChatConversation = ChatConversation(
@@ -66,3 +68,17 @@ internal fun encodeImagePaths(paths: List<String>): String =
 internal fun decodeImagePaths(value: String): List<String> = runCatching {
     imagePathJson.decodeFromString<JsonArray>(value).mapNotNull { it as? JsonPrimitive }.map { it.content }
 }.getOrDefault(emptyList())
+
+internal fun encodeWebSearchResults(results: List<com.example.aichat.data.network.WebSearchResult>?): String? {
+    if (results.isNullOrEmpty()) return null
+    return runCatching {
+        imagePathJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(com.example.aichat.data.network.WebSearchResult.serializer()), results)
+    }.getOrNull()
+}
+
+internal fun decodeWebSearchResults(value: String?): List<com.example.aichat.data.network.WebSearchResult>? {
+    if (value.isNullOrBlank()) return null
+    return runCatching {
+        imagePathJson.decodeFromString(kotlinx.serialization.builtins.ListSerializer(com.example.aichat.data.network.WebSearchResult.serializer()), value)
+    }.getOrNull()
+}
