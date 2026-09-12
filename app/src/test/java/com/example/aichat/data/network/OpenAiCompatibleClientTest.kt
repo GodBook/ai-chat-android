@@ -23,6 +23,27 @@ import java.util.concurrent.TimeUnit
 
 class OpenAiCompatibleClientTest {
     @Test
+    fun `document question and followup carry extracted source without image support`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: [DONE]\n\n"))
+            val source = com.example.aichat.data.attachment.DocumentText.compose("金额是多少？", listOf(
+                com.example.aichat.data.attachment.DocumentAttachment("合同.pdf", "[第 3 页]\n金额：173 元", 100),
+            ))
+            val client = OpenAiCompatibleClient(imageFileStore = TestImageStore, allowInsecureHttp = true)
+            client.streamChat(
+                ProviderConfig(baseUrl = server.url("/v1").toString(), model = "text-only", apiKey = "test", visionEnabled = false),
+                listOf(ChatRequestMessage(MessageRole.USER, source), ChatRequestMessage(MessageRole.ASSISTANT, "173 元"),
+                    ChatRequestMessage(MessageRole.USER, "出自哪一页？")),
+            ).toList()
+            val payload = kotlinx.serialization.json.Json.parseToJsonElement(server.takeRequest().body.readUtf8())
+            val messages = (payload as kotlinx.serialization.json.JsonObject)["messages"] as kotlinx.serialization.json.JsonArray
+            val firstContent = (messages.first() as kotlinx.serialization.json.JsonObject)["content"] as kotlinx.serialization.json.JsonPrimitive
+            assertEquals(source, firstContent.content)
+            assertTrue(messages.last().toString().contains("出自哪一页"))
+        }
+    }
+
+    @Test
     fun `temporary data URI images are transmitted without accessing image files`() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: [DONE]\n\n"))

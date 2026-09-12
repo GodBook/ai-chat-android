@@ -1,4 +1,6 @@
 package com.example.aichat.ui
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material3.LinearProgressIndicator
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -175,6 +177,9 @@ internal fun ChatScreen(
     onSetProviderProfile: (profileId: String?) -> Unit = {},
     onSetContextWindowLimit: (limit: Int) -> Unit = {},
     onClearHighlightedMessage: () -> Unit = {},
+    onImportDocuments: (List<android.net.Uri>) -> Unit = {},
+    onRemoveDocument: (Int) -> Unit = {},
+    onSharedDraftConsumed: () -> Unit = {},
 ) {
     var draft by if (state.isTemporary) remember(state.selectedConversationId) { mutableStateOf("") } else rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -204,6 +209,10 @@ internal fun ChatScreen(
     var automaticScrollDepth by remember { mutableIntStateOf(0) }
     val isNearBottom by remember { derivedStateOf { listState.isNearBottom() } }
     var pickerConversationId by remember { mutableStateOf<String?>(null) }
+    var documentPickerConversationId by remember { mutableStateOf<String?>(null) }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (documentPickerConversationId == state.selectedConversationId) onImportDocuments(uris)
+    }
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -272,6 +281,12 @@ internal fun ChatScreen(
         state.draftToRestore?.takeIf { draft.isBlank() }?.let {
             draft = it
             onDraftRestored()
+        }
+    }
+    LaunchedEffect(state.selectedConversationId, state.sharedDraft?.id) {
+        state.sharedDraft?.takeIf { it.conversationId == state.selectedConversationId }?.let {
+            draft = it.text
+            quotedMessage = null
         }
     }
 
@@ -496,7 +511,8 @@ internal fun ChatScreen(
                 } else {
                     cleanDraft
                 }
-                if (fullText.isNotBlank() || state.selectedImagePaths.isNotEmpty()) {
+                if (!state.attachments.importing && !state.isWorking && (fullText.isNotBlank() || state.selectedImagePaths.isNotEmpty() || state.attachments.documents.isNotEmpty())) {
+                    onSharedDraftConsumed()
                     onSend(fullText)
                     draft = ""
                     quotedMessage = null
@@ -525,16 +541,24 @@ internal fun ChatScreen(
             )
             Composer(
                 draft = draft,
+                files = state.attachments.documents,
+                importingFiles = state.attachments.importing,
+                onRemoveDocument = onRemoveDocument,
+                onPickDocument = {
+                    documentPickerConversationId = state.selectedConversationId
+                    documentPicker.launch(arrayOf("*/*"))
+                },
                 selectedImages = state.selectedImagePaths,
                 isWorking = state.isWorking,
                 webSearchActive = state.webSearchActive,
                 quotedMessage = quotedMessage,
                 lastUserMessage = lastUserMessage,
-                onDraftChange = { draft = it },
+                onDraftChange = { draft = it; onSharedDraftConsumed() },
                 onCancelQuote = { quotedMessage = null },
                 onEditLastMessage = {
                     lastUserMessage?.let { lastMsg ->
                         draft = lastMsg.text
+                        onSharedDraftConsumed()
                         quotedMessage = null
                     }
                 },
@@ -548,7 +572,7 @@ internal fun ChatScreen(
                 onToggleWebSearch = onToggleWebSearch,
                 onSend = handleSend,
                 onStop = onStop,
-                onUsePrompt = { draft = it },
+                onUsePrompt = { draft = it; onSharedDraftConsumed() },
             )
             }
         },
@@ -1131,6 +1155,10 @@ private fun SlashCommandSuggestions(
 @Composable
 private fun Composer(
     draft: String,
+    files: List<com.example.aichat.data.attachment.DocumentAttachment>,
+    importingFiles: Boolean,
+    onPickDocument: () -> Unit,
+    onRemoveDocument: (Int) -> Unit,
     selectedImages: List<String>,
     isWorking: Boolean,
     webSearchActive: Boolean,
@@ -1235,7 +1263,7 @@ private fun Composer(
             }
 
             AnimatedVisibility(
-                visible = draft.isBlank() && selectedImages.isEmpty() && !isWorking,
+                visible = draft.isBlank() && selectedImages.isEmpty() && files.isEmpty() && !isWorking && !importingFiles,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut(),
             ) {
@@ -1297,6 +1325,12 @@ private fun Composer(
                 }
             }
 
+            if (importingFiles) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("正在解析文件…", style = MaterialTheme.typography.labelSmall)
+            }
+            if (files.isNotEmpty()) DocumentChips(files, onRemoveDocument)
+
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
@@ -1320,7 +1354,7 @@ private fun Composer(
                     }
                 },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (draft.isNotBlank() || selectedImages.isNotEmpty()) onSend() }),
+                keyboardActions = KeyboardActions(onSend = { if (!isWorking && !importingFiles && (draft.isNotBlank() || selectedImages.isNotEmpty() || files.isNotEmpty())) onSend() }),
             )
 
             Row(
@@ -1332,8 +1366,11 @@ private fun Composer(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    IconButton(onClick = onPickDocument, enabled = !isWorking && !importingFiles, modifier = Modifier.size(36.dp)) {
+                        Icon(androidx.compose.material.icons.Icons.Default.AttachFile, contentDescription = "添加文件", modifier = Modifier.size(22.dp))
+                    }
                     IconButton(
                         onClick = onPickImage,
                         enabled = !isWorking,
@@ -1399,7 +1436,7 @@ private fun Composer(
 
                 FilledIconButton(
                     onClick = if (isWorking) onStop else onSend,
-                    enabled = isWorking || draft.isNotBlank() || selectedImages.isNotEmpty(),
+                    enabled = isWorking || (!importingFiles && (draft.isNotBlank() || selectedImages.isNotEmpty() || files.isNotEmpty())),
                     modifier = Modifier.size(40.dp),
                 ) {
                     AnimatedContent(
@@ -1495,9 +1532,7 @@ private fun MessageBubble(
                     }
 
                     if (isUser) {
-                        SelectionContainer {
-                            MarkdownText(markdown = message.text)
-                        }
+                        DocumentMessageText(message.text)
                     } else {
                         // AI Response Body
                         if (!message.thinkingContent.isNullOrBlank()) {

@@ -71,6 +71,18 @@ fun AiChatApp(viewModel: MainViewModel) {
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    state.incomingShare?.let { share ->
+        IncomingShareDialog(share, state.conversations, state.isAnyWorking,
+            onDismiss = viewModel::dismissShare,
+            onAccept = { target ->
+                viewModel.acceptShare(target) {
+                    navController.navigate(Routes.CHAT) {
+                        popUpTo(Routes.CONTACTS)
+                        launchSingleTop = true
+                    }
+                }
+            })
+    }
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -192,6 +204,9 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onBack = { navController.popBackStack() },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onImportImage = viewModel::importImage,
+                    onImportDocuments = { viewModel.importDocuments(context, it) },
+                    onRemoveDocument = viewModel::removeDocument,
+                    onSharedDraftConsumed = viewModel::consumeSharedDraft,
                     onRemoveImage = viewModel::removeSelectedImage,
                     onSend = viewModel::send,
                     onStop = viewModel::stop,
@@ -258,6 +273,8 @@ fun AiChatApp(viewModel: MainViewModel) {
                     state = state, onBack = exit,
                     onOpenSettings = { exit(); navController.navigate(Routes.SETTINGS) },
                     onImportImage = { viewModel.importTemporaryImage(it, state.selectedConversationId) }, onRemoveImage = viewModel::removeSelectedImage,
+                    onImportDocuments = { viewModel.importDocuments(context, it) },
+                    onRemoveDocument = viewModel::removeDocument,
                     onSend = viewModel::send, onStop = viewModel::stop, onRetry = viewModel::retry,
                     onRegenerate = viewModel::regenerate, onDeleteMessage = viewModel::deleteMessage,
                     onClear = viewModel::clearConversation, onDraftRestored = {},

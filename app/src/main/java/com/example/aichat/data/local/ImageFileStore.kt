@@ -20,6 +20,21 @@ interface ImageStore {
 
 /** Copies selected media into app-private storage so the URI remains usable later. */
 class ImageFileStore(private val context: Context) : ImageStore {
+    /** Validate and downsample external shares before storing any message attachment. */
+    suspend fun importShared(uri: Uri): String = withContext(Dispatchers.IO) {
+        val bytes = context.contentResolver.openInputStream(uri)?.use {
+            com.example.aichat.data.attachment.DocumentText.readBounded(it)
+        } ?: throw IOException("无法读取分享图片")
+        val source = android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))
+        val bitmap = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            require(info.size.width.toLong() * info.size.height <= 64_000_000) { "图片像素过大，请缩小后分享" }
+            val scale = 1600.0 / maxOf(1600, info.size.width, info.size.height)
+            decoder.setTargetSize(maxOf(1, (info.size.width * scale).toInt()), maxOf(1, (info.size.height * scale).toInt()))
+            decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+        try { saveScreenshot(bitmap) } finally { bitmap.recycle() }
+    }
+
     /** Decode directly from the selected URI; temporary images never create a private file. */
     suspend fun importInMemory(uri: Uri): String = withContext(Dispatchers.IO) {
         val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)

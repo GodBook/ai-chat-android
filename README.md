@@ -4,9 +4,12 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 
 源码仓库：[github.com/GodBook/ai-chat-android](https://github.com/GodBook/ai-chat-android)
 
-当前版本：**1.7.0（versionCode 34）**。更新说明见 [release-notes-1.7.0.md](release-notes-1.7.0.md)。
+当前版本：**1.7.3（versionCode 37）**。更新说明见 [release-notes-1.7.3.md](release-notes-1.7.3.md)。
 
 ## 功能
+
+- **文件问答**：输入栏添加 TXT、Markdown、代码、CSV、DOCX 或文字型 PDF，本地提取后预览并发送；资料随消息保存，可追问、重试、导出和备份。
+- **接收系统分享**：从其他应用分享文字、链接、图片与文件到 AI BOTOY，确认后导入新聊天或已有聊天的草稿，手动发送。
 
 - **智能体角色面具系统 (AI Personas & Custom Prompts)**：内置 12 款官方精选角色面具（资深架构师、学术中英同传、苏格拉底思辨导师、小红书运营、代码审阅官等），赋予 AI 鲜明专业人设；支持自由创建个性化面具，设定专属系统提示词 (System Prompt)、采样温度 (Temperature) 与偏好模型，会话顶栏随时一键快捷切换
 - **多服务商与配置预设中心 (Multi-Provider Profile Hub)**：彻底解决多厂商反复修改端点与密钥痛点；内置 DeepSeek、硅基流动 SiliconFlow、OpenAI、阿里云通义千问、月之暗面 Kimi 等预设并支持无限自定义服务商；每个预设均配备 Android Keystore 硬件级 AES-GCM 独立加密密钥隔离，并支持不同会话独立绑定服务商预设
@@ -55,6 +58,18 @@ AI BOTOY 是面向 Android 10 至 Android 16 的原生 AI 聊天应用。配置 
 - 使用 Room 保存聊天记录，DataStore 保存普通设置，Android Keystore 加密 API Key
 
 ## 开始使用
+
+### 文件问答与系统分享（1.7.3）
+
+进入聊天后点击输入栏的回形针“添加文件”，选择文件，点按文件卡片核对提取结果，再输入问题发送。只发送文件时默认请模型总结。支持 UTF-8/UTF-16 文本、Markdown、常见代码、CSV/TSV、JSON/XML/YAML、DOCX 和文字型 PDF。文件在本机解析，发送时将提取文字交给所选模型；开启联网搜索时也会使用所配置的搜索服务。
+
+每次最多 4 个文档，单文件最多 10 MB，每个文档最多 12,000 字符，合计最多 24,000 字符；超出范围会在预览中说明。PDF 带页码，最多 200 页；扫描件需先 OCR 或分享页面图片，加密 PDF 需先解密。DOCX 仅提取正文和表格文字，不含图片、批注及页眉页脚。保存的是实际提取的文字，原始文档不会备份或保留。后续追问仍受会话上下文轮数限制，可重新附加文件补充资料。
+
+其他应用通过系统“分享”选择 AI BOTOY 后，会先显示分享确认窗口。可选新建聊天或已有聊天，导入后编辑并手动发送；导入会替换当前未发送草稿和附件。链接作为文字导入，不自动读取网页。每次最多接收 8 个项目，其中最多 4 张图片和 4 个文档；失败项目单独提示，成功内容仍可导入。分享图片会验证并缩小至长边不超过 1600 像素。
+
+附件组织与预览设计参考 DeepSeek Harness 的 `docs/subsystems/attachment.zh.md` 和 `packages/client/ui-sidebar-documentpreview`，参考提交为 `c291e7961a515f6d7af9304e7fd1d257929aef26`。本应用采用适合 Android 聊天的本地文字提取方案，未移植 Harness 的服务端运行环境。PDF 提取使用 PdfBox-Android 2.0.27.0，Apache 2.0 许可及 NOTICE 随 APK 打包在 assets 中。
+
+### 配置模型并开始聊天
 
 1. 打开右上角的“设置”。
 2. 填写模型服务的 HTTPS Base URL、模型名称和 API Key；需要发送图片时开启“支持图片”。默认接口地址为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-v4.1-flash-expires-on-0910`；只有服务端明确返回“模型不存在/已过期”一类错误时才会自动改用 `deepseek-v4-flash` 重试，普通请求错误不会切换模型。“模型失效自动回退”开关可以彻底关闭这一行为。模型名称下方的“快捷选择”可以一键填入常用模型（DeepSeek 系列、GPT-4o mini、GPT-4.1 mini），也可以直接在输入框里手写任意模型名；只有当你填的是官方默认地址时，快捷选择才会顺带切换接口地址，自建网关或中转站地址不会被覆盖。

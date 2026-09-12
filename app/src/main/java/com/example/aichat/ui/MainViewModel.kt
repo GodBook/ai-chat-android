@@ -2,6 +2,13 @@ package com.example.aichat.ui
 
 import android.content.Context
 import android.net.Uri
+import android.content.Intent
+import com.example.aichat.data.attachment.AttachmentComposerState
+import com.example.aichat.data.attachment.DocumentAttachment
+import com.example.aichat.data.attachment.DocumentImporter
+import com.example.aichat.data.attachment.DocumentText
+import com.example.aichat.data.attachment.IncomingShare
+import com.example.aichat.data.attachment.SharePreview
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -103,6 +110,9 @@ data class MainUiState(
     val config: ProviderConfig = ProviderConfig(),
     val hasApiKey: Boolean = false,
     val selectedImagePaths: List<String> = emptyList(),
+    val attachments: AttachmentComposerState = AttachmentComposerState(),
+    val incomingShare: SharePreview? = null,
+    val sharedDraft: com.example.aichat.data.attachment.SharedDraft? = null,
     val isWorking: Boolean = false,
     val isAnyWorking: Boolean = false,
     val message: String? = null,
@@ -171,6 +181,12 @@ class MainViewModel(
     private var deepSearchJob: kotlinx.coroutines.Job? = null
     private val selectedConversationId = MutableStateFlow<String?>(null)
     private val selectedImagePaths = MutableStateFlow<List<String>>(emptyList())
+    private val attachments = MutableStateFlow(AttachmentComposerState())
+    private val incomingShare = MutableStateFlow<SharePreview?>(null)
+    private val sharedDraft = MutableStateFlow<com.example.aichat.data.attachment.SharedDraft?>(null)
+    private var documentImportGeneration = 0L
+    private var documentImportJob: kotlinx.coroutines.Job? = null
+    private var shareImportJob: kotlinx.coroutines.Job? = null
     private val transientMessage = MutableStateFlow<String?>(null)
     private val draftToRestore = MutableStateFlow<String?>(null)
     private val apiKeyAvailable = MutableStateFlow(runCatching { apiKeyStore.hasKey() }.getOrDefault(false))
@@ -309,6 +325,12 @@ class MainViewModel(
         val persona = selectedConv?.personaId?.let { id -> state.personas.firstOrNull { it.id == id } }
         val profile = selectedConv?.providerProfileId?.let { id -> state.providerProfiles.firstOrNull { it.id == id } }
         state.copy(activePersona = persona, activeProviderProfile = profile)
+    }.combine(attachments) { state, files ->
+        state.copy(attachments = files)
+    }.combine(incomingShare) { state, share ->
+        state.copy(incomingShare = share)
+    }.combine(sharedDraft) { state, draft ->
+        state.copy(sharedDraft = draft)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
 
@@ -318,7 +340,7 @@ class MainViewModel(
             repository.recoverInterruptedMessages()
             val existing = repository.conversations.first()
             if (existing.isEmpty()) repository.createConversation()
-            selectedConversationId.value = repository.conversations.first().firstOrNull()?.id
+            if (selectedConversationId.value == null) selectedConversationId.value = repository.conversations.first().firstOrNull()?.id
         }
         viewModelScope.launch {
             repository.conversations.collect { conversations ->
@@ -675,13 +697,19 @@ class MainViewModel(
     }
 
     fun send(text: String) {
+        if (attachments.value.importing) { transientMessage.value = "请等待文件解析完成"; return }
+        val files = attachments.value.documents
+        val outgoingText = DocumentText.compose(text, files)
         if (temporary.state.value.id != null) {
-            prepareTemporaryRequest { config -> temporary.send(text, config) }
+            prepareTemporaryRequest { config ->
+                temporary.send(outgoingText, config)
+                attachments.value = AttachmentComposerState()
+            }
             return
         }
         if (uiState.value.isWorking) return
         val images = selectedImagePaths.value
-        if (text.isBlank() && images.isEmpty()) {
+        if (outgoingText.isBlank() && images.isEmpty()) {
             transientMessage.value = "请输入消息或选择图片"
             return
         }
@@ -690,6 +718,7 @@ class MainViewModel(
         val conversationId = selectedConversationId.value
         draftToRestore.value = null
         selectedImagePaths.value = emptyList()
+        attachments.value = AttachmentComposerState()
         viewModelScope.launch {
             var targetId = conversationId
             try {
@@ -697,7 +726,7 @@ class MainViewModel(
                     targetId = it.id
                     selectedConversationId.value = it.id
                 }.id
-                repository.sendMessage(resolvedTargetId, text, images, webSearch = isWebSearch)
+                repository.sendMessage(resolvedTargetId, outgoingText, images, webSearch = isWebSearch)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -705,6 +734,7 @@ class MainViewModel(
                     if (conversationGeneration.get() == generation && selectedConversationId.value == targetId) {
                         selectedImagePaths.value = (images + selectedImagePaths.value).distinct()
                         draftToRestore.value = text
+                        attachments.value = AttachmentComposerState(documents = files)
                     } else {
                         deleteComposerImages(images)
                     }
@@ -723,11 +753,15 @@ class MainViewModel(
         if (uiState.value.isAnyWorking) { transientMessage.value = "请先停止正在生成的回复"; return }
         transientMessage.value = null
         temporaryPreparation?.cancel()
+        clearDocuments()
         temporary.start()
         onReady()
     }
 
-    fun closeTemporaryConversation() { temporaryPreparation?.cancel(); temporary.close(); transientMessage.value = null }
+    fun closeTemporaryConversation() {
+        if (temporary.state.value.id == null) return
+        temporaryPreparation?.cancel(); clearDocuments(); temporary.close(); transientMessage.value = null
+    }
     fun hasTemporaryConversation(): Boolean = temporary.state.value.id != null
     fun importTemporaryImage(uri: Uri, sessionId: String?) {
         if (sessionId != null && temporary.state.value.id == sessionId) importImage(uri)
@@ -817,6 +851,7 @@ class MainViewModel(
     }
 
     fun clearConversation() {
+        clearDocuments()
         if (temporary.state.value.id != null) { temporaryPreparation?.cancel(); temporary.clear(); return }
         val conversationId = selectedConversationId.value ?: return
         val generation = conversationGeneration.incrementAndGet()
@@ -1008,10 +1043,124 @@ class MainViewModel(
     }
 
     private fun discardComposerImages() {
+        sharedDraft.value = null
+        clearDocuments()
         val oldImages = selectedImagePaths.value
         selectedImagePaths.value = emptyList()
         deleteComposerImages(oldImages)
     }
+
+    private fun clearDocuments() {
+        documentImportGeneration++
+        documentImportJob?.cancel()
+        attachments.value = AttachmentComposerState()
+    }
+
+    fun removeDocument(index: Int) {
+        attachments.update { it.copy(documents = it.documents.filterIndexed { i, _ -> i != index }) }
+    }
+
+    fun importDocuments(context: Context, uris: List<Uri>) {
+        if (uris.isEmpty() || attachments.value.importing || uiState.value.isWorking) return
+        if (uris.size + attachments.value.documents.size > DocumentText.MAX_FILES) {
+            transientMessage.value = "一次最多添加 4 个文件"; return
+        }
+        val importer = DocumentImporter(context.applicationContext)
+        val importGeneration = ++documentImportGeneration
+        attachments.update { it.copy(importing = true) }
+        documentImportJob = viewModelScope.launch {
+            val errors = mutableListOf<String>()
+            try {
+                for (uri in uris) {
+                    try {
+                        val file = importer.import(uri)
+                        require(attachments.value.documents.sumOf { it.text.length } + file.text.length <= DocumentText.MAX_TOTAL_CHARS) { "附件合计最多 24,000 字符，请移除部分文件" }
+                        attachments.update { it.copy(documents = it.documents + file) }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { errors += failure.message ?: "文件解析失败" }
+                }
+                if (errors.isNotEmpty()) transientMessage.value = errors.joinToString("\n")
+            } finally {
+                if (importGeneration == documentImportGeneration) attachments.update { it.copy(importing = false) }
+            }
+        }
+    }
+
+    fun receiveShare(context: Context, intent: Intent) {
+        val request = try { IncomingShare.from(intent, context.packageName) }
+        catch (failure: Exception) { transientMessage.value = failure.message ?: "无法读取分享内容"; return }
+        if (request == null) return
+        if (incomingShare.value != null) { transientMessage.value = "请先处理当前分享，再重新分享新内容"; return }
+        incomingShare.value = SharePreview(request.text, loading = true)
+        val appContext = context.applicationContext
+        shareImportJob = viewModelScope.launch {
+            val images = mutableListOf<String>()
+            val documents = mutableListOf<DocumentAttachment>()
+            val errors = mutableListOf<String>()
+            var committed = false
+            try {
+                for (uri in request.uris) {
+                    try {
+                        val mime = withContext(Dispatchers.IO) { appContext.contentResolver.getType(uri).orEmpty() }
+                        if (mime.startsWith("image/")) {
+                            require(images.size < 4) { "一次最多分享 4 张图片" }
+                            images += imageFileStore.importShared(uri)
+                        } else {
+                            require(documents.size < DocumentText.MAX_FILES) { "一次最多分享 4 个文件" }
+                            val file = DocumentImporter(appContext).import(uri)
+                            require(documents.sumOf { it.text.length } + file.text.length <= DocumentText.MAX_TOTAL_CHARS) { "附件合计最多 24,000 字符" }
+                            documents += file
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { errors += failure.message ?: "分享项目读取失败" }
+                }
+                incomingShare.value = SharePreview(request.text, images.toList(), documents.toList(), errors)
+                committed = true
+            } finally {
+                if (!committed) withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    images.forEach { runCatching { imageFileStore.delete(it) } }
+                }
+            }
+        }
+    }
+
+    fun dismissShare() {
+        shareImportJob?.cancel()
+        incomingShare.value?.images?.let(::deleteComposerImages)
+        incomingShare.value = null
+    }
+
+    fun acceptShare(conversationId: String?, onReady: () -> Unit) {
+        val share = incomingShare.value ?: return
+        if (share.loading || uiState.value.isAnyWorking) { transientMessage.value = "请等待导入完成，并停止正在生成的回复"; return }
+        if (share.text.isBlank() && share.images.isEmpty() && share.documents.isEmpty()) return
+        // Prevent a double tap from creating two destination conversations.
+        incomingShare.value = share.copy(loading = true)
+        viewModelScope.launch {
+            try {
+                val target = if (conversationId == null) repository.createConversation("分享问答").id
+                    else repository.conversations.first().firstOrNull { it.id == conversationId }?.id
+                        ?: throw IllegalArgumentException("目标聊天已不存在，请选择新聊天")
+                temporaryPreparation?.cancel()
+                temporary.close()
+                conversationGeneration.incrementAndGet()
+                discardComposerImages()
+                selectedConversationId.value = target
+                selectedImagePaths.value = share.images
+                attachments.value = AttachmentComposerState(documents = share.documents)
+                draftToRestore.value = null
+                sharedDraft.value = com.example.aichat.data.attachment.SharedDraft(target, share.text)
+                incomingShare.value = null
+                onReady()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                incomingShare.value = share
+                transientMessage.value = failure.message ?: "无法导入分享"
+            }
+        }
+    }
+
+    fun consumeSharedDraft() { sharedDraft.value = null }
 
     private fun restoreComposerImages(
         paths: List<String>,
