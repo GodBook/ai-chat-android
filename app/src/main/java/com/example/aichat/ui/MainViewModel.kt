@@ -134,6 +134,9 @@ data class MainUiState(
     val deepSearchQuery: String = "",
     val deepSearchResults: List<MessageSearchResultItem> = emptyList(),
     val isDeepSearching: Boolean = false,
+    val searchFilter: com.example.aichat.data.model.MessageSearchFilter = com.example.aichat.data.model.MessageSearchFilter(),
+    val searchHasMore: Boolean = false,
+    val searchError: String? = null,
     val highlightedMessageId: String? = null,
     val ttsPlaybackState: TtsPlaybackState = TtsPlaybackState(),
 )
@@ -200,6 +203,11 @@ class MainViewModel(
     private val deepSearchQuery = MutableStateFlow("")
     private val deepSearchResults = MutableStateFlow<List<MessageSearchResultItem>>(emptyList())
     private val isDeepSearching = MutableStateFlow(false)
+    private val searchFilter = MutableStateFlow(com.example.aichat.data.model.MessageSearchFilter())
+    private val searchHasMore = MutableStateFlow(false)
+    private val searchError = MutableStateFlow<String?>(null)
+    private var searchGeneration = 0L
+    private var searchSince = 0L
     private val highlightedMessageId = MutableStateFlow<String?>(null)
 
 
@@ -316,6 +324,9 @@ class MainViewModel(
         state.copy(deepSearchResults = results)
     }.combine(isDeepSearching) { state, searching ->
         state.copy(isDeepSearching = searching)
+    }.combine(searchFilter) { state, filter -> state.copy(searchFilter = filter)
+    }.combine(searchHasMore) { state, more -> state.copy(searchHasMore = more)
+    }.combine(searchError) { state, error -> state.copy(searchError = error)
     }.combine(highlightedMessageId) { state, hl ->
         state.copy(highlightedMessageId = hl)
     }.combine(ttsManager.playbackState) { state, tts ->
@@ -1420,38 +1431,66 @@ class MainViewModel(
 
     // --- 跨会话深度全文搜索与定位跳转 ---
     fun setDeepSearchQuery(query: String) {
-        deepSearchQuery.value = query
-        val trimmed = query.trim()
-        deepSearchJob?.cancel()
-        if (trimmed.isEmpty()) {
-            deepSearchResults.value = emptyList()
-            isDeepSearching.value = false
-            return
-        }
-        deepSearchJob = viewModelScope.launch {
-            isDeepSearching.value = true
-            try {
-                repository.searchAllMessages(trimmed).collect { results ->
-                    deepSearchResults.value = results
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Throwable) {
-                deepSearchResults.value = emptyList()
-            } finally {
-                isDeepSearching.value = false
-            }
-        }
+        deepSearchQuery.value = query.take(200)
+        runMessageSearch(reset = true)
     }
 
-    fun jumpToMessage(conversationId: String, messageId: String) {
-        if (conversationId != selectedConversationId.value) {
-            conversationGeneration.incrementAndGet()
-            discardComposerImages()
-            draftToRestore.value = null
-            selectedConversationId.value = conversationId
+    fun setSearchFilter(filter: com.example.aichat.data.model.MessageSearchFilter) {
+        searchFilter.value = filter
+        runMessageSearch(reset = true)
+    }
+
+    fun loadMoreSearch() { if (searchHasMore.value && !isDeepSearching.value) runMessageSearch(reset = false) }
+
+    private fun runMessageSearch(reset: Boolean) {
+        deepSearchJob?.cancel()
+        val generation = ++searchGeneration
+        val keyword = deepSearchQuery.value.trim()
+        val filter = searchFilter.value
+        if (reset) {
+            deepSearchResults.value = emptyList()
+            searchHasMore.value = false
+            searchSince = if (filter.days > 0) System.currentTimeMillis() - filter.days * 86_400_000L else 0L
         }
-        highlightedMessageId.value = messageId
+        searchError.value = null
+        if (keyword.isEmpty()) { isDeepSearching.value = false; return }
+        isDeepSearching.value = true
+        val cursor = if (reset) null else deepSearchResults.value.lastOrNull()?.let {
+            com.example.aichat.data.model.MessageSearchCursor(it.createdAt, it.id)
+        }
+        deepSearchJob = viewModelScope.launch {
+            try {
+                if (reset) kotlinx.coroutines.delay(250)
+                val rows = repository.searchMessagePage(keyword, filter, searchSince, cursor, 51)
+                if (generation != searchGeneration) return@launch
+                deepSearchResults.value = (if (reset) emptyList() else deepSearchResults.value) + rows.take(50)
+                searchHasMore.value = rows.size > 50
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { if (generation == searchGeneration) searchError.value = "搜索失败，请重试" }
+            finally { if (generation == searchGeneration) isDeepSearching.value = false }
+        }
+    }
+    fun jumpToMessage(conversationId: String, messageId: String) {
+        if (uiState.value.isAnyWorking) { transientMessage.value = "请先停止正在生成的回复"; return }
+        viewModelScope.launch {
+            try {
+                val raw = repository.observeMessages(conversationId).first()
+                val target = raw.firstOrNull { it.id == messageId }
+                if (target == null) { transientMessage.value = "消息已删除，请重新搜索"; return@launch }
+                if (target.role == MessageRole.ASSISTANT && target.requestId != null) {
+                    val branches = raw.filter { it.role == MessageRole.ASSISTANT && it.requestId == target.requestId }
+                    selectedBranches.update { it + (target.requestId to branches.indexOfFirst { it.id == messageId }.coerceAtLeast(0)) }
+                }
+                if (conversationId != selectedConversationId.value) {
+                    conversationGeneration.incrementAndGet()
+                    discardComposerImages()
+                    draftToRestore.value = null
+                    selectedConversationId.value = conversationId
+                }
+                highlightedMessageId.value = messageId
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { transientMessage.value = "无法定位消息，请重新搜索" }
+        }
     }
 
     fun clearHighlightedMessage() {
@@ -1524,4 +1563,3 @@ class MainViewModelFactory(private val container: AppContainer) : ViewModelProvi
         ) as T
     }
 }
-

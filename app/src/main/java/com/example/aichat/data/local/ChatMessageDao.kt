@@ -83,6 +83,21 @@ interface ChatMessageDao {
     )
     fun searchAllMessages(keyword: String): Flow<List<MessageSearchResultItem>>
 
+    @Query("""
+        SELECT m.id AS id, m.conversationId AS conversationId, m.role AS role,
+               m.text AS text, m.createdAt AS createdAt,
+               c.title AS conversationTitle, c.icon AS conversationIcon
+        FROM chat_messages m INNER JOIN chat_conversations c ON m.conversationId = c.id
+        WHERE m.text LIKE :pattern ESCAPE '\'
+          AND (:conversationId IS NULL OR m.conversationId = :conversationId)
+          AND (:role IS NULL OR m.role = :role)
+          AND m.createdAt >= :since
+          AND (:beforeTime IS NULL OR m.createdAt < :beforeTime OR (m.createdAt = :beforeTime AND m.id < :beforeId))
+        ORDER BY m.createdAt DESC, m.id DESC LIMIT :limit
+    """)
+    suspend fun searchMessagePage(pattern: String, conversationId: String?, role: String?, since: Long,
+        beforeTime: Long?, beforeId: String?, limit: Int): List<MessageSearchResultItem>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(message: ChatMessageEntity)
 

@@ -1,4 +1,5 @@
 package com.example.aichat.ui
+import androidx.compose.ui.platform.testTag
 
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
@@ -159,11 +160,17 @@ internal fun ContactsScreen(
     isDeepSearching: Boolean = false,
     onDeepSearchQueryChange: (String) -> Unit = {},
     onJumpToMessage: (conversationId: String, messageId: String) -> Unit = { _, _ -> },
+    searchFilter: com.example.aichat.data.model.MessageSearchFilter = com.example.aichat.data.model.MessageSearchFilter(),
+    onSearchFilter: (com.example.aichat.data.model.MessageSearchFilter) -> Unit = {},
+    searchHasMore: Boolean = false,
+    searchError: String? = null,
+    onLoadMoreSearch: () -> Unit = {},
+    searchQuery: String = "",
 ) {
 
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
+
     var renameTarget by remember { mutableStateOf<ChatConversation?>(null) }
     var iconTarget by remember { mutableStateOf<ChatConversation?>(null) }
     var setGroupTarget by remember { mutableStateOf<ChatConversation?>(null) }
@@ -319,8 +326,8 @@ internal fun ContactsScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = {
-                                searchQuery = it
-                                onDeepSearchQueryChange(it)
+
+                                onDeepSearchQueryChange(it.take(200))
                             },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
                             placeholder = { Text("搜索聊天或跨会话全文检索…") },
@@ -328,13 +335,14 @@ internal fun ContactsScreen(
                             trailingIcon = {
                                 TextButton(
                                     onClick = {
-                                        searchQuery = ""
+
                                         onDeepSearchQueryChange("")
                                         searchOpen = false
                                     },
                                 ) { Text("关闭") }
                             },
                         )
+                        MessageSearchFilters(searchFilter, onSearchFilter)
                     }
 
                 }
@@ -397,7 +405,7 @@ internal fun ContactsScreen(
                 ) {
                     Text("正在准备聊天列表…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else if (visibleConversations.isEmpty() && deepSearchResults.isEmpty() && !isDeepSearching) {
+            } else if (visibleConversations.isEmpty() && deepSearchResults.isEmpty() && !isDeepSearching && searchError == null) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -609,6 +617,10 @@ internal fun ContactsScreen(
                     }
 
                     if (searchQuery.isNotBlank()) {
+                        if (searchError != null) item(key = "search_error") {
+                            Text(searchError, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp))
+                            TextButton(onClick = { onDeepSearchQueryChange(searchQuery) }) { Text("重试搜索") }
+                        }
                         if (isDeepSearching) {
                             item(key = "deep_search_loading") {
                                 Row(
@@ -627,7 +639,7 @@ internal fun ContactsScreen(
                         if (deepSearchResults.isNotEmpty()) {
                             item(key = "deep_search_header") {
                                 Text(
-                                    text = "消息全文匹配 (${deepSearchResults.size} 条)",
+                                    text = "消息全文匹配（已显示 ${deepSearchResults.size} 条）",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -637,15 +649,18 @@ internal fun ContactsScreen(
                             items(deepSearchResults, key = { "msg_search_${it.id}" }) { resultItem ->
                                 MessageSearchResultRow(
                                     item = resultItem,
-                                    keyword = searchQuery,
+                                    keyword = searchQuery.trim(),
                                     onClick = {
                                         commitPendingDelete()
-                                        searchQuery = ""
+
                                         searchOpen = false
                                         onDeepSearchQueryChange("")
                                         onJumpToMessage(resultItem.conversationId, resultItem.id)
                                     },
                                 )
+                            }
+                            if (searchHasMore) item(key = "search_more") {
+                                TextButton(onClick = onLoadMoreSearch, enabled = !isDeepSearching, modifier = Modifier.fillMaxWidth()) { Text("加载更多消息") }
                             }
                         }
                     }
@@ -1359,13 +1374,14 @@ private fun ChatMessage.previewText(): String = when {
 }
 
 @Composable
-private fun MessageSearchResultRow(
+internal fun MessageSearchResultRow(
     item: MessageSearchResultItem,
     keyword: String,
     onClick: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
+            .testTag("search-result-${item.id}")
             .fillMaxWidth()
             .padding(horizontal = 14.dp, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -1398,7 +1414,8 @@ private fun MessageSearchResultRow(
                     )
                 }
                 Text(
-                    text = if (item.role == "USER") "👤 用户" else "🤖 AI",
+                    text = (if (item.role == "USER") "用户" else "AI") + " · " + java.time.Instant.ofEpochMilli(item.createdAt)
+                        .atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1413,4 +1430,3 @@ private fun MessageSearchResultRow(
         }
     }
 }
-

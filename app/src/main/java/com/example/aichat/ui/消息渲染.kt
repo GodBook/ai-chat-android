@@ -1054,6 +1054,10 @@ private fun MarkdownCodeBlock(block: MarkdownBlockModel.CodeBlock) {
                 }
             }
 
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                com.example.aichat.ui.export.SaveBlockButton("另存为代码文件",
+                    com.example.aichat.ui.export.BlockExportFormatter.codeFilename(block.language), block.code, "text/plain")
+            }
             // Divider under header
             HorizontalDivider(
                 thickness = 0.5.dp,
@@ -1169,6 +1173,8 @@ private fun MarkdownTable(table: MarkdownBlockModel.Table) {
         }
     }
 
+    Column {
+    com.example.aichat.ui.export.TableExportActions(table)
     BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         val totalWeight = columnWeights.sum().toFloat().coerceAtLeast(1f)
         val availableWidth = maxWidth
@@ -1276,5 +1282,6 @@ private fun MarkdownTable(table: MarkdownBlockModel.Table) {
                 }
             }
         }
+    }
     }
 }

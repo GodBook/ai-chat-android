@@ -180,6 +180,10 @@ internal fun ChatScreen(
     onImportDocuments: (List<android.net.Uri>) -> Unit = {},
     onRemoveDocument: (Int) -> Unit = {},
     onSharedDraftConsumed: () -> Unit = {},
+    onSearchQuery: (String) -> Unit = {},
+    onSearchFilter: (com.example.aichat.data.model.MessageSearchFilter) -> Unit = {},
+    onLoadMoreSearch: () -> Unit = {},
+    onSearchJump: (String, String) -> Unit = { _, _ -> },
 ) {
     var draft by if (state.isTemporary) remember(state.selectedConversationId) { mutableStateOf("") } else rememberSaveable { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -192,20 +196,26 @@ internal fun ChatScreen(
     var showPersonaDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showContextWindowDialog by remember { mutableStateOf(false) }
+    var showSearch by rememberSaveable { mutableStateOf(false) }
+    if (showSearch) ConversationSearchDialog(state, onSearchQuery, onSearchFilter, onLoadMoreSearch, onSearchJump) {
+        showSearch = false
+        onSearchQuery("")
+    }
 
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    var shouldFollowTail by remember { mutableStateOf(true) }
 
-    LaunchedEffect(state.highlightedMessageId) {
+    LaunchedEffect(state.highlightedMessageId, state.messages.map { it.id }) {
         val targetId = state.highlightedMessageId ?: return@LaunchedEffect
         val targetIndex = state.messages.indexOfFirst { it.id == targetId }
         if (targetIndex >= 0) {
+            shouldFollowTail = false
             listState.animateScrollToItem(targetIndex)
             delay(3000)
             onClearHighlightedMessage()
         }
     }
-    var shouldFollowTail by remember { mutableStateOf(true) }
     var automaticScrollDepth by remember { mutableIntStateOf(0) }
     val isNearBottom by remember { derivedStateOf { listState.isNearBottom() } }
     var pickerConversationId by remember { mutableStateOf<String?>(null) }
@@ -253,9 +263,9 @@ internal fun ChatScreen(
         }
     }
     LaunchedEffect(state.selectedConversationId) {
-        shouldFollowTail = true
+        shouldFollowTail = state.highlightedMessageId == null
         draft = ""
-        if (state.messages.isNotEmpty()) scrollToTail(animated = false)
+        if (state.messages.isNotEmpty() && shouldFollowTail) scrollToTail(animated = false)
     }
     LaunchedEffect(state.messages.size) {
         val followTail = shouldFollowTail
@@ -412,6 +422,13 @@ internal fun ChatScreen(
                             onDismissRequest = { showMoreMenu = false },
                         ) {
                             if (!state.isTemporary) {
+                                DropdownMenuItem(text = { Text("搜索当前聊天") }, enabled = !state.isAnyWorking,
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onSearchQuery("")
+                                        onSearchFilter(com.example.aichat.data.model.MessageSearchFilter(conversationId = state.selectedConversationId))
+                                        showSearch = true
+                                    })
                                 DropdownMenuItem(
                                     text = { Text("角色面具 (${state.activePersona?.name ?: "默认"})") },
                                     leadingIcon = { Icon(Icons.Default.Face, contentDescription = null) },

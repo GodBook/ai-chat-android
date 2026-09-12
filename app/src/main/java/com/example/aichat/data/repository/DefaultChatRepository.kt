@@ -96,6 +96,13 @@ class DefaultChatRepository(
         return dao.searchAllMessages(clean).flowOn(Dispatchers.IO)
     }
 
+    override suspend fun searchMessagePage(keyword: String, filter: com.example.aichat.data.model.MessageSearchFilter,
+        since: Long, cursor: com.example.aichat.data.model.MessageSearchCursor?, limit: Int): List<com.example.aichat.data.local.MessageSearchResultItem> {
+        if (keyword.isBlank()) return emptyList()
+        return dao.searchMessagePage(com.example.aichat.data.model.literalSearchPattern(keyword), filter.conversationId,
+            filter.role, since, cursor?.createdAt, cursor?.id, limit.coerceIn(1, 101))
+    }
+
     override fun observeAllPersonas(): Flow<List<com.example.aichat.data.model.ChatPersona>> =
         personaDao.getAllPersonas()
             .map { list -> list.map { it.toDomain() } }

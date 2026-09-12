@@ -136,6 +136,8 @@ interface ChatRepository {
         ProbeResult(false, 0L, "未实现")
 
     fun searchAllMessages(keyword: String): Flow<List<com.example.aichat.data.local.MessageSearchResultItem>> = emptyFlow()
+    suspend fun searchMessagePage(keyword: String, filter: com.example.aichat.data.model.MessageSearchFilter,
+        since: Long, cursor: com.example.aichat.data.model.MessageSearchCursor?, limit: Int): List<com.example.aichat.data.local.MessageSearchResultItem> = emptyList()
 
     fun observeAllPersonas(): Flow<List<com.example.aichat.data.model.ChatPersona>> = emptyFlow()
     suspend fun getPersona(id: String): com.example.aichat.data.model.ChatPersona? = null

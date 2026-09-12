@@ -146,6 +146,12 @@ fun AiChatApp(viewModel: MainViewModel) {
             },
         ) {
             composable(Routes.CONTACTS) {
+                LaunchedEffect(Unit) {
+                    if (state.searchFilter.conversationId != null) {
+                        viewModel.setDeepSearchQuery("")
+                        viewModel.setSearchFilter(state.searchFilter.copy(conversationId = null))
+                    }
+                }
                 ContactsScreen(
                     conversations = state.conversations,
                     previews = state.conversationPreviews,
@@ -190,10 +196,16 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     deepSearchResults = state.deepSearchResults,
                     isDeepSearching = state.isDeepSearching,
+                    searchFilter = state.searchFilter,
+                    searchQuery = state.deepSearchQuery,
+                    onSearchFilter = viewModel::setSearchFilter,
+                    searchHasMore = state.searchHasMore,
+                    searchError = state.searchError,
+                    onLoadMoreSearch = viewModel::loadMoreSearch,
                     onDeepSearchQueryChange = viewModel::setDeepSearchQuery,
                     onJumpToMessage = { convId, msgId ->
                         viewModel.jumpToMessage(convId, msgId)
-                        navController.navigate(Routes.CHAT)
+                        if (!state.isAnyWorking) navController.navigate(Routes.CHAT)
                     },
                 )
 
@@ -207,6 +219,10 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onImportDocuments = { viewModel.importDocuments(context, it) },
                     onRemoveDocument = viewModel::removeDocument,
                     onSharedDraftConsumed = viewModel::consumeSharedDraft,
+                    onSearchQuery = viewModel::setDeepSearchQuery,
+                    onSearchFilter = viewModel::setSearchFilter,
+                    onLoadMoreSearch = viewModel::loadMoreSearch,
+                    onSearchJump = viewModel::jumpToMessage,
                     onRemoveImage = viewModel::removeSelectedImage,
                     onSend = viewModel::send,
                     onStop = viewModel::stop,
