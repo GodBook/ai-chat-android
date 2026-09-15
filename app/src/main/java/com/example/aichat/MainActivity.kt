@@ -40,4 +40,15 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         mainViewModel.receiveShare(this, intent)
     }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            val tts = (application as AiChatApplication).container.ttsManager
+            if (tts.playbackState.value.let { it.isPlaying || it.isPaused }) {
+                tts.stop()
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 }

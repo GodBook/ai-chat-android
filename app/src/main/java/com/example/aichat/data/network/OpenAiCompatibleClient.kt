@@ -90,6 +90,11 @@ class OpenAiCompatibleClient(
         config: ProviderConfig,
         messages: List<ChatRequestMessage>,
         temperature: Float? = null,
+    ): Flow<ChatStreamEvent> = streamChatWithModelTracking(config, messages, temperature) {}
+
+    fun streamChatWithModelTracking(
+        config: ProviderConfig, messages: List<ChatRequestMessage>, temperature: Float? = null,
+        onModelAttempt: suspend (String) -> Unit,
     ): Flow<ChatStreamEvent> = flow {
         val candidates = if (config.autoFallbackEnabled) {
             modelCandidatesFor(config.model)
@@ -100,6 +105,7 @@ class OpenAiCompatibleClient(
         for ((index, model) in candidates.withIndex()) {
             var emittedAnyText = false
             try {
+                onModelAttempt(model)
                 streamChatOnce(config, model, messages, temperature).collect { event ->
                     if (event is ChatStreamEvent.Delta || event is ChatStreamEvent.ThinkingDelta) emittedAnyText = true
                     emit(event)

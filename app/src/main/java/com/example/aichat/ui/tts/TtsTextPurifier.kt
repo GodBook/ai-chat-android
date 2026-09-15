@@ -30,8 +30,9 @@ object TtsTextPurifier {
         text = text.replace(Regex("\\$([^$]+)\\$"), "$1")
         text = text.replace(Regex("\\\\\\((.*?)\\\\\\)"), "$1")
 
-        // 5. 清除来源引用 [来源 1]、[来源 1, 2]、[1] 等
+        // 5. 清除来源引用 [来源 1]、[来源 1, 2]、[1] 等及截图简答机器标记 [简答:...]
         text = text.replace(Regex("\\[(?:来源\\s*)?\\d+(?:\\s*[,，、]\\s*\\d+)*\\]"), "")
+        text = text.replace(Regex("(?i)\\[简答\\s*[:：]\\s*.*?\\]"), "")
 
         // 6. 清理 Markdown 链接 [title](url) -> title 与图片 ![alt](url) -> ""
         text = text.replace(Regex("!\\[.*?\\]\\(.*?\\)"), "")

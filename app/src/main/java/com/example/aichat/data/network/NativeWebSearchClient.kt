@@ -29,7 +29,7 @@ class WebSearchClient(
         .readTimeout(90, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build())
         .newBuilder().followRedirects(false).followSslRedirects(false).build()
 
-    suspend fun search(query: String, config: ProviderConfig, maxResults: Int = 8, previousQuery: String? = null): List<WebSearchResult> = withContext(Dispatchers.IO) {
+    suspend fun search(query: String, config: ProviderConfig, maxResults: Int = 8, previousQuery: String? = null, onRequestText: ((String) -> Unit)? = null): List<WebSearchResult> = withContext(Dispatchers.IO) {
         if (query.isBlank() || maxResults <= 0) return@withContext emptyList()
         val options = resolveConfig(config)
         val key = options.apiKey?.trim()?.takeIf { it.isNotEmpty() }
@@ -43,6 +43,7 @@ class WebSearchClient(
             append("\nCurrent date and timezone: ").append(java.time.ZonedDateTime.now(clock))
             if (!previousQuery.isNullOrBlank()) append("\nPrevious user question (context for resolving references only): ").append(previousQuery.take(1200))
         }
+        onRequestText?.invoke(text)
         val body = buildJsonObject {
             put("model", options.model); put("max_tokens", 4096)
             putJsonArray("messages") { add(buildJsonObject {

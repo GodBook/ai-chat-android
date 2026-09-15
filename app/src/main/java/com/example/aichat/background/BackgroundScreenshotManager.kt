@@ -75,6 +75,7 @@ object BackgroundScreenshotManager {
 
     /** Requests a capture through the platform-appropriate screenshot path. */
     fun captureNow(context: Context): Boolean {
+        (context.applicationContext as? com.example.aichat.AiChatApplication)?.container?.ttsManager?.stop()
         if (usesAccessibilityScreenshot) {
             return runningAccessibilityService?.captureFromTrigger() == true
         }

@@ -21,6 +21,18 @@ data class AppStorageStats(
 )
 
 interface ChatRepository {
+    fun observeKnowledgeCards(): Flow<List<com.example.aichat.data.model.KnowledgeCard>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    fun observeBranchSelections(): Flow<List<com.example.aichat.data.model.BranchSelection>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    suspend fun saveKnowledgeCard(card: com.example.aichat.data.model.KnowledgeCard) {}
+    suspend fun deleteKnowledgeCard(id: String) {}
+    suspend fun selectBranch(conversationId: String, requestId: String, assistantId: String) {}
+    suspend fun getContextRecord(id: String): com.example.aichat.data.model.ContextRecord? = null
+    suspend fun getKnowledgeBackup(): com.example.aichat.data.model.KnowledgeBackup = com.example.aichat.data.model.KnowledgeBackup()
+    suspend fun restoreKnowledgeData(conversations: List<ChatConversationEntity>, messages: List<ChatMessageEntity>, knowledge: com.example.aichat.data.model.KnowledgeBackup) { restoreBackupData(conversations, messages) }
+    suspend fun previewContext(conversationId: String, text: String, images: List<String>, options: com.example.aichat.data.model.ContextOptions): com.example.aichat.data.model.ContextPlan? = null
+    suspend fun sendPlannedMessage(conversationId: String, text: String, images: List<String>, webSearch: Boolean, options: com.example.aichat.data.model.ContextOptions): String = sendMessage(conversationId, text, images, webSearch)
+    suspend fun detachConversationCards(conversationId: String) {}
+
     val searchingConversation: Flow<String?>
         get() = kotlinx.coroutines.flow.flowOf(null)
 
@@ -73,6 +85,8 @@ interface ChatRepository {
 
     suspend fun reorderConversationsInGroup(orderedConversationIds: List<String>): Boolean = false
 
+    suspend fun deleteConversationConfigured(conversationId: String, keepCards: Boolean): Boolean = deleteConversation(conversationId)
+    suspend fun deleteConversationsConfigured(ids: Collection<String>, keepCards: Boolean): Int = deleteConversations(ids)
     suspend fun deleteConversation(conversationId: String): Boolean = false
  
     suspend fun deleteConversations(conversationIds: Collection<String>): Int = 0

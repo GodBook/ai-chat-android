@@ -190,6 +190,8 @@ data class ProviderConfig(
     val themeColor: String = DEFAULT_THEME_COLOR,
     /** Whether web search is enabled by default in new conversations. */
     val defaultWebSearchEnabled: Boolean = false,
+    /** Enables automatic TTS voice playback of AI screenshot answers in background. */
+    val screenshotAssistantEnabled: Boolean = false,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

@@ -76,7 +76,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10, ChatDatabase.MIGRATION_10_11)
             .build()
         roomDatabase = migrated
 
@@ -122,7 +122,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10, ChatDatabase.MIGRATION_10_11)
             .build()
         roomDatabase = migrated
 
@@ -177,7 +177,7 @@ class ChatDatabaseMigrationTest {
         }
 
         val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10)
+            .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3, ChatDatabase.MIGRATION_3_4, ChatDatabase.MIGRATION_4_5, ChatDatabase.MIGRATION_5_6, ChatDatabase.MIGRATION_6_7, ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10, ChatDatabase.MIGRATION_10_11)
             .build()
         roomDatabase = migrated
 
@@ -206,7 +206,7 @@ class ChatDatabaseMigrationTest {
             db.execSQL("INSERT INTO chat_messages (id,role,text,imagePaths,status,createdAt,conversationId) VALUES ('message','USER','保留消息','[]','SENT',100,'one')")
             db.version = 7
         }
-        val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME).addMigrations(ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10).build()
+        val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME).addMigrations(ChatDatabase.MIGRATION_7_8, ChatDatabase.MIGRATION_8_9, ChatDatabase.MIGRATION_9_10, ChatDatabase.MIGRATION_10_11).build()
         roomDatabase = migrated
         assertEquals("保留消息", migrated.chatMessageDao().getAll().single().text)
         val original = migrated.chatConversationDao().getById("one")!!
@@ -220,6 +220,27 @@ class ChatDatabaseMigrationTest {
         assertEquals(original.copy(icon = "🧠"), reopened.chatConversationDao().getById("one"))
         reopened.chatConversationDao().setIcon("one", null)
         assertNull(reopened.chatConversationDao().getById("one")!!.icon)
+    }
+
+    @Test
+    fun migrationFrom10AddsKnowledgeTablesWithoutChangingExistingMessages() = runBlocking {
+        val current = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME).build()
+        current.chatConversationDao().insert(ChatConversationEntity("ten", "旧聊天", 1, 1))
+        current.chatMessageDao().insert(ChatMessageEntity("ten-message", "USER", "原资料", status = "SENT", createdAt = 1, conversationId = "ten"))
+        current.close()
+        context.openOrCreateDatabase(DATABASE_NAME, Context.MODE_PRIVATE, null).use { old ->
+            old.execSQL("DROP TABLE knowledge_cards")
+            old.execSQL("DROP TABLE conversation_branch_selections")
+            old.execSQL("DROP TABLE request_context_records")
+            old.execSQL("DROP TABLE room_master_table")
+            old.version = 10
+        }
+        val migrated = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME).addMigrations(ChatDatabase.MIGRATION_10_11).build()
+        roomDatabase = migrated
+        assertEquals("原资料", migrated.chatMessageDao().getById("ten-message")!!.text)
+        assertEquals(emptyList<KnowledgeCardEntity>(), migrated.knowledgeDao().cards())
+        migrated.knowledgeDao().saveCard(KnowledgeCardEntity("test", "ten", "{}"))
+        assertEquals(1, migrated.knowledgeDao().cards().size)
     }
 
     private companion object {

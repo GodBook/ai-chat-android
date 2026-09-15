@@ -83,6 +83,9 @@ fun AiChatApp(viewModel: MainViewModel) {
                 }
             })
     }
+    KnowledgeDialogs(state, viewModel) {
+        navController.navigate(Routes.CHAT) { popUpTo(Routes.CONTACTS); launchSingleTop = true }
+    }
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -174,6 +177,9 @@ fun AiChatApp(viewModel: MainViewModel) {
                     },
                     onRenameConversation = viewModel::renameConversation,
                     onDeleteConversation = viewModel::deleteConversation,
+                    onDeleteWithCards = viewModel::deleteConversationWithCards,
+                    onDeleteManyWithCards = viewModel::deleteConversationsWithCards,
+                    cardConversationIds = state.workbench.cards.mapNotNull { it.conversationId }.toSet(),
                     onDeleteConversations = viewModel::deleteConversations,
                     onExportConversation = { id ->
                         viewModel.exportConversation(id) { title, content ->
@@ -193,6 +199,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onSetConversationIcon = viewModel::setConversationIcon,
                     onReorderConversationsInGroup = viewModel::reorderConversationsInGroup,
                     onTemporaryConversation = { viewModel.startTemporaryConversation { navController.navigate(Routes.TEMPORARY) } },
+                    onOpenCards = { viewModel.openCards(true) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     deepSearchResults = state.deepSearchResults,
                     isDeepSearching = state.isDeepSearching,
@@ -223,6 +230,12 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onSearchFilter = viewModel::setSearchFilter,
                     onLoadMoreSearch = viewModel::loadMoreSearch,
                     onSearchJump = viewModel::jumpToMessage,
+                    onRefreshContext = viewModel::refreshContext,
+                    onOpenContext = viewModel::openContext,
+                    onOpenCards = { viewModel.openCards() },
+                    onSaveCard = { viewModel.newCard(it) },
+                    onContextRecord = viewModel::showContextRecord,
+                    onPersistDraft = viewModel::persistContinuationDraft,
                     onRemoveImage = viewModel::removeSelectedImage,
                     onSend = viewModel::send,
                     onStop = viewModel::stop,
@@ -324,6 +337,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             autoFallbackEnabled,
                             screenshotTrigger,
                             autoCollapseThinking,
+                            screenshotAssistantEnabled,
                         ->
                         viewModel.saveConfig(
                             baseUrl = baseUrl,
@@ -339,6 +353,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             autoFallbackEnabled = autoFallbackEnabled,
                             screenshotTrigger = screenshotTrigger,
                             autoCollapseThinking = autoCollapseThinking,
+                            screenshotAssistantEnabled = screenshotAssistantEnabled,
                         ).also { result ->
                             if (result.isSuccess) {
                                 if (backgroundEnabled) {
@@ -365,6 +380,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     },
                     onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
                     onShortAnswerModeChanged = viewModel::setShortAnswerModeEnabled,
+                    onScreenshotAssistantChanged = viewModel::setScreenshotAssistantEnabled,
                     onAutoFallbackEnabledChanged = viewModel::setAutoFallbackEnabled,
                     onAutoCollapseThinkingChanged = viewModel::setAutoCollapseThinking,
                     onModelPresetSelected = viewModel::selectModelPreset,

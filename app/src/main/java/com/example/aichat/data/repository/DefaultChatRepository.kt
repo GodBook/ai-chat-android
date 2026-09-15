@@ -1,5 +1,7 @@
 package com.example.aichat.data.repository
 
+import com.example.aichat.data.model.*
+import com.example.aichat.data.local.KnowledgeStore
 import com.example.aichat.data.local.ApiKeyStore
 import com.example.aichat.data.local.ChatConversationDao
 import com.example.aichat.data.local.ChatConversationEntity
@@ -60,6 +62,45 @@ class DefaultChatRepository(
     private val conversationDao: ChatConversationDao = database.chatConversationDao()
     private val personaDao: com.example.aichat.data.local.ChatPersonaDao = database.chatPersonaDao()
     private val profileDao: com.example.aichat.data.local.ProviderProfileDao = database.providerProfileDao()
+
+    private val knowledge = KnowledgeStore(database)
+    override fun observeKnowledgeCards() = knowledge.cards
+    override fun observeBranchSelections() = knowledge.branches
+    override suspend fun saveKnowledgeCard(card: KnowledgeCard) = knowledge.save(card)
+    override suspend fun deleteKnowledgeCard(id: String) = knowledge.deleteCard(id)
+    override suspend fun selectBranch(conversationId: String, requestId: String, assistantId: String) = knowledge.select(conversationId, requestId, assistantId)
+    override suspend fun getContextRecord(id: String) = knowledge.record(id)
+    override suspend fun getKnowledgeBackup() = knowledge.backup()
+    override suspend fun detachConversationCards(conversationId: String) = knowledge.detachCards(conversationId)
+    override suspend fun restoreKnowledgeData(conversations: List<ChatConversationEntity>, messages: List<ChatMessageEntity>, knowledge: KnowledgeBackup) {
+        database.withTransaction { restoreBackupData(conversations, messages); this@DefaultChatRepository.knowledge.restore(knowledge) }
+    }
+
+    private suspend fun plan(conversationId: String, prior: List<ChatMessage>, current: ChatRequestMessage,
+        model: String, options: ContextOptions, previous: ContextRecord? = null): ContextPlan {
+        val conversation = conversationDao.getById(conversationId)
+        val persona = conversation?.personaId?.let { personaDao.getPersonaById(it) }
+        val selections = previous?.entries?.mapNotNull { entry -> entry.assistantId?.let { id ->
+            prior.firstOrNull { it.id == id }?.requestId?.let { it to id }
+        } }?.toMap() ?: knowledge.selections(conversationId)
+        val exclusions = previous?.entries?.filter { it.reason == "手动排除" }?.map { it.userId }?.toSet() ?: options.excludedUserIds
+        return ContextPlanner.build(prior, current, model, previous?.systemPrompt ?: persona?.systemPrompt.orEmpty(),
+            conversation?.contextWindowLimit ?: 8, selections, options.copy(excludedUserIds = exclusions))
+    }
+
+    override suspend fun previewContext(conversationId: String, text: String, images: List<String>, options: ContextOptions): ContextPlan {
+        val (config, _) = readProviderConfigForConversation(conversationId)
+        return plan(conversationId, dao.getForConversation(conversationId).map { it.toDomain() },
+            ChatRequestMessage(MessageRole.USER, ContextPlanner.withCards(text, options.cards).trim(), images), config.model, options)
+    }
+
+    private suspend fun savePlan(plan: ContextPlan, user: ChatMessage, assistant: ChatMessage,
+        query: String? = null, search: String? = null, searchEnabled: Boolean = query != null) {
+        knowledge.record(ContextRecord(assistantMessageId = assistant.id, conversationId = user.conversationId,
+            userMessageId = user.id, model = plan.model, systemPrompt = plan.systemPrompt, entries = plan.entries,
+            cards = plan.cards, searchEnabled = searchEnabled, searchQuery = query, searchContext = search,
+            characterCount = plan.characterCount, imageCount = plan.imageCount))
+    }
 
     override val conversations: Flow<List<ChatConversation>> = conversationDao.observeAll()
         .map { rows -> rows.map { it.toDomain() } }
@@ -154,7 +195,7 @@ class DefaultChatRepository(
 
     override suspend fun setConversationContextWindowLimit(conversationId: String, limit: Int): Boolean =
         withContext(Dispatchers.IO) {
-            conversationDao.setContextWindowLimit(normalizeConversationId(conversationId), limit.coerceIn(1, 100), System.currentTimeMillis()) > 0
+            conversationDao.setContextWindowLimit(normalizeConversationId(conversationId), limit.coerceIn(0, 100), System.currentTimeMillis()) > 0
         }
 
     @Volatile
@@ -175,15 +216,16 @@ class DefaultChatRepository(
     override suspend fun sendMessage(text: String, imagePaths: List<String>, webSearch: Boolean): String =
         sendMessage(DEFAULT_CONVERSATION_ID, text, imagePaths, webSearch)
 
-    override suspend fun sendMessage(
-        conversationId: String,
-        text: String,
-        imagePaths: List<String>,
-        webSearch: Boolean,
+    override suspend fun sendMessage(conversationId: String, text: String, imagePaths: List<String>, webSearch: Boolean): String =
+        sendPlannedMessage(conversationId, text, imagePaths, webSearch, ContextOptions())
+
+    override suspend fun sendPlannedMessage(
+        conversationId: String, text: String, images: List<String>, webSearch: Boolean, options: ContextOptions,
     ): String = withRequestLock {
+        val imagePaths = images
         val selectedConversationId = normalizeConversationId(conversationId)
         ensureConversation(selectedConversationId)
-        val cleanText = text.trim()
+        val cleanText = ContextPlanner.withCards(text, options.cards).trim()
         require(cleanText.isNotEmpty() || imagePaths.isNotEmpty()) { "消息内容不能为空" }
 
         val (config, personaTemperature) = readProviderConfigForConversation(selectedConversationId)
@@ -196,6 +238,9 @@ class DefaultChatRepository(
             )
         }
 
+        // Freeze choices before network work; invalid local budgets must not consume the draft.
+        val initialPlan = plan(selectedConversationId, dao.getForConversation(selectedConversationId).map { it.toDomain() },
+            ChatRequestMessage(MessageRole.USER, cleanText, imagePaths), config.model, options)
         val requestId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         val user = ChatMessage(
@@ -232,13 +277,13 @@ class DefaultChatRepository(
             stopRequestedFor = null
         }
 
-        val previousQuery = dao.getForConversation(selectedConversationId)
-            .filter { it.id != user.id && it.id != assistant.id }
-            .lastOrNull { it.role == MessageRole.USER.name }?.text
+        val previousQuery = initialPlan.entries.lastOrNull { it.reason == null }?.userId?.let { dao.getById(it)?.text }
+        savePlan(initialPlan, user, assistant, searchEnabled = webSearch)
+        var searchRequestText: String? = null
 
         val searchResults = if (webSearch && cleanText.isNotEmpty()) {
             try {
-                searchForConversation(selectedConversationId, config, cleanText, previousQuery)
+                searchForConversation(selectedConversationId, config, cleanText, previousQuery) { searchRequestText = it }
             } catch (cancelled: CancellationException) {
                 dao.update(assistant.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止").toEntity())
                 throw cancelled
@@ -272,23 +317,20 @@ class DefaultChatRepository(
             user.toRequestMessage()
         }
 
-        val limit = conversation?.contextWindowLimit ?: 8
-        val windowSize = if (limit > 0) limit * 2 else Int.MAX_VALUE
-
-        val history = run {
-            val rawMessages = dao.getForConversation(selectedConversationId).map { it.toDomain() }
-            val activeMessages = resolveMessageBranches(rawMessages.filter { it.id != assistant.id })
-            val sentMessages = activeMessages.filter { it.status == MessageStatus.SENT }
-            val windowedMessages = sentMessages.takeLast(windowSize)
-            val priorList = windowedMessages.map { if (it.id == user.id) userRequestMessage else it.toRequestMessage() }
-
-            val persona = conversation?.personaId?.let { personaDao.getPersonaById(it)?.toDomain() }
-            val systemMessage = persona?.systemPrompt?.takeIf { it.isNotBlank() }?.let {
-                listOf(ChatRequestMessage(role = MessageRole.SYSTEM, text = it))
-            } ?: emptyList()
-
-            systemMessage + limitContext(priorList)
+        val finalPlan = try {
+            // Search may add evidence, so rebuild against the same selected history and choices.
+            val frozenIds = initialPlan.entries.flatMap { listOfNotNull(it.userId, it.assistantId) }.toSet()
+            val prior = dao.getForConversation(selectedConversationId).map { it.toDomain() }.filter { it.id in frozenIds }
+            ContextPlanner.build(prior, userRequestMessage, config.model, initialPlan.systemPrompt,
+                conversation?.contextWindowLimit ?: 8,
+                prior.filter { it.role == MessageRole.ASSISTANT && it.requestId != null }.associate { it.requestId!! to it.id }, options)
+        } catch (failure: Exception) {
+            dao.update(assistant.copy(status = MessageStatus.FAILED, errorMessage = failure.message).toEntity())
+            throw ChatClientException(ChatErrorKind.PROVIDER, failure.message ?: "上下文超限", cause = failure, requestWasPersisted = true)
         }
+        savePlan(finalPlan, user, assistant, searchRequestText,
+            if (searchResults != null) userRequestMessage.text.removePrefix(cleanText) else null)
+        val history = finalPlan.messages
 
         val completed = try {
             runGenerationInChild(
@@ -361,9 +403,13 @@ class DefaultChatRepository(
             stopRequestedFor = null
         }
 
-        val refreshedResults = if (target.webSearchResults != null) {
+        var searchRequestText: String? = null
+        val previousRecord = knowledge.record(target.id)
+        val previousQuestion = if (previousRecord != null) previousRecord.entries.lastOrNull { it.reason == null }?.userId?.let { dao.getById(it)?.text }
+            else all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text
+        val refreshedResults = if (target.webSearchResults != null || previousRecord?.searchEnabled == true) {
             try {
-                searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+                searchForConversation(selectedConversationId, config, user.text, previousQuestion) { searchRequestText = it }
             } catch (cancelled: CancellationException) {
                 dao.update(pending.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止").toEntity())
                 throw cancelled
@@ -392,22 +438,22 @@ class DefaultChatRepository(
             user.toRequestMessage()
         }
         val conversation = conversationDao.getById(selectedConversationId)?.toDomain()
-        val limit = conversation?.contextWindowLimit ?: 8
-        val windowSize = if (limit > 0) limit * 2 else Int.MAX_VALUE
-        val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
-        val sentPrior = activePriorHistory.filter { it.status == MessageStatus.SENT }.takeLast(windowSize)
-
         val persona = conversation?.personaId?.let { personaDao.getPersonaById(it)?.toDomain() }
-        val systemMessage = persona?.systemPrompt?.takeIf { it.isNotBlank() }?.let {
-            listOf(ChatRequestMessage(role = MessageRole.SYSTEM, text = it))
-        } ?: emptyList()
-
-        val history = systemMessage + limitContext(sentPrior
-            .map { it.toRequestMessage() }
-            .plus(userRequestMessage))
+        val previousPlan = knowledge.record(target.id)
+        val requestPlan = try {
+            plan(selectedConversationId, all.take(userIndex.coerceAtLeast(0)), userRequestMessage, config.model,
+                ContextOptions(cards = previousPlan?.cards.orEmpty()), previousPlan)
+        } catch (failure: Exception) {
+            dao.update(pending.copy(status = MessageStatus.FAILED, errorMessage = failure.message).toEntity())
+            throw ChatClientException(ChatErrorKind.PROVIDER, failure.message ?: "上下文超限", cause = failure, requestWasPersisted = true)
+        }
+        savePlan(requestPlan, user, pending, searchRequestText,
+            if (refreshedResults != null) userRequestMessage.text.removePrefix(user.text) else null)
+        val history = requestPlan.messages
 
         val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending, temperature = persona?.temperature)
         completed.throwIfUnsuccessful()
+        pending.requestId?.let { knowledge.select(selectedConversationId, it, pending.id) }
         pending.id
     }
 
@@ -467,9 +513,13 @@ class DefaultChatRepository(
             stopRequestedFor = null
         }
 
-        val refreshedResults = if (target.webSearchResults != null) {
+        var searchRequestText: String? = null
+        val previousRecord = knowledge.record(target.id)
+        val previousQuestion = if (previousRecord != null) previousRecord.entries.lastOrNull { it.reason == null }?.userId?.let { dao.getById(it)?.text }
+            else all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text
+        val refreshedResults = if (target.webSearchResults != null || previousRecord?.searchEnabled == true) {
             try {
-                searchForConversation(selectedConversationId, config, user.text, all.take(userIndex).lastOrNull { it.role == MessageRole.USER }?.text)
+                searchForConversation(selectedConversationId, config, user.text, previousQuestion) { searchRequestText = it }
             } catch (cancelled: CancellationException) {
                 dao.update(pending.copy(status = MessageStatus.INTERRUPTED, errorMessage = "已停止").toEntity())
                 throw cancelled
@@ -497,22 +547,22 @@ class DefaultChatRepository(
         } else {
             user.toRequestMessage()
         }
-        val regenLimit = conversation?.contextWindowLimit ?: 8
-        val regenWindowSize = if (regenLimit > 0) regenLimit * 2 else Int.MAX_VALUE
-        val activePriorHistory = resolveMessageBranches(all.take(userIndex.coerceAtLeast(0)))
-        val sentPrior = activePriorHistory.filter { it.status == MessageStatus.SENT }.takeLast(regenWindowSize)
-
         val persona = conversation?.personaId?.let { personaDao.getPersonaById(it)?.toDomain() }
-        val systemMessage = persona?.systemPrompt?.takeIf { it.isNotBlank() }?.let {
-            listOf(ChatRequestMessage(role = MessageRole.SYSTEM, text = it))
-        } ?: emptyList()
-
-        val history = systemMessage + limitContext(sentPrior
-            .map { it.toRequestMessage() }
-            .plus(userRequestMessage))
+        val previousPlan = knowledge.record(target.id)
+        val requestPlan = try {
+            plan(selectedConversationId, all.take(userIndex.coerceAtLeast(0)), userRequestMessage, config.model,
+                ContextOptions(cards = previousPlan?.cards.orEmpty()), previousPlan)
+        } catch (failure: Exception) {
+            dao.update(pending.copy(status = MessageStatus.FAILED, errorMessage = failure.message).toEntity())
+            throw ChatClientException(ChatErrorKind.PROVIDER, failure.message ?: "上下文超限", cause = failure, requestWasPersisted = true)
+        }
+        savePlan(requestPlan, user, pending, searchRequestText,
+            if (refreshedResults != null) userRequestMessage.text.removePrefix(user.text) else null)
+        val history = requestPlan.messages
 
         val completed = runGenerationInChild(this, config, history, if (refreshedResults != null) pending.copy(webSearchResults = refreshedResults) else pending, temperature = personaTemperature)
         completed.throwIfUnsuccessful()
+        pending.requestId?.let { knowledge.select(selectedConversationId, it, pending.id) }
         pending.id
     }
 
@@ -523,7 +573,7 @@ class DefaultChatRepository(
                 runCatching { imageFileStore.delete(path) }
             }
         }
-        val deleted = dao.deleteById(messageId) > 0
+        val deleted = database.withTransaction { knowledge.deleteMessage(messageId); dao.deleteById(messageId) > 0 }
         if (deleted) {
             conversationDao.touch(target.conversationId, System.currentTimeMillis())
         }
@@ -647,7 +697,8 @@ class DefaultChatRepository(
         }
     }
 
-    override suspend fun deleteConversation(conversationId: String): Boolean {
+    override suspend fun deleteConversation(conversationId: String) = deleteConversationConfigured(conversationId, false)
+    override suspend fun deleteConversationConfigured(conversationId: String, keepCards: Boolean): Boolean {
         val id = normalizeConversationId(conversationId)
         awaitActiveRequestIfNeeded(id)
         requestMutex.lock()
@@ -657,7 +708,10 @@ class DefaultChatRepository(
                     if (conversationDao.getById(id) == null) return@withTransaction null
                     val oldMessages = dao.getForConversation(id).map { it.toDomain() }
                     // Keep this explicit because the v1 table could not have a conversation FK.
+                    knowledge.clearConversation(id, deleteCards = false)
                     dao.deleteForConversation(id)
+                    if (keepCards) knowledge.detachCards(id)
+                    knowledge.clearConversation(id, deleteCards = !keepCards)
                     check(conversationDao.deleteById(id) == 1) { "删除聊天失败" }
                     if (conversationDao.count() == 0) {
                         val now = System.currentTimeMillis()
@@ -674,6 +728,7 @@ class DefaultChatRepository(
                 }
             }
             if (removedMessages == null) return false
+            configStore.saveContinuationDraft(id, null)
             deleteUnreferencedMessageImages(removedMessages)
             return true
         } finally {
@@ -681,7 +736,9 @@ class DefaultChatRepository(
         }
     }
 
-    override suspend fun deleteConversations(conversationIds: Collection<String>): Int {
+    override suspend fun deleteConversations(conversationIds: Collection<String>) = deleteConversationsConfigured(conversationIds, false)
+    override suspend fun deleteConversationsConfigured(ids: Collection<String>, keepCards: Boolean): Int {
+        val conversationIds = ids
         val targetIds = conversationIds.map { normalizeConversationId(it) }.distinct()
         if (targetIds.isEmpty()) return 0
         targetIds.forEach { awaitActiveRequestIfNeeded(it) }
@@ -690,6 +747,7 @@ class DefaultChatRepository(
             val (deletedCount, removedMessages) = withContext(Dispatchers.IO) {
                 database.withTransaction {
                     val messages = dao.getForConversations(targetIds).map { it.toDomain() }
+                    targetIds.forEach { if (keepCards) knowledge.detachCards(it); knowledge.clearConversation(it, deleteCards = !keepCards) }
                     dao.deleteForConversations(targetIds)
                     val count = conversationDao.deleteByIds(targetIds)
                     if (conversationDao.count() == 0) {
@@ -707,6 +765,7 @@ class DefaultChatRepository(
                 }
             }
             deleteUnreferencedMessageImages(removedMessages)
+            targetIds.forEach { configStore.saveContinuationDraft(it, null) }
             return deletedCount
         } finally {
             requestMutex.unlock()
@@ -725,11 +784,13 @@ class DefaultChatRepository(
             val removedMessages = withContext(Dispatchers.IO) {
                 database.withTransaction {
                     val oldMessages = dao.getForConversation(id).map { it.toDomain() }
+                    knowledge.clearConversation(id, deleteCards = false)
                     dao.deleteForConversation(id)
                     conversationDao.touch(id, System.currentTimeMillis())
                     oldMessages
                 }
             }
+            configStore.saveContinuationDraft(id, null)
             deleteUnreferencedMessageImages(removedMessages)
         } finally {
             requestMutex.unlock()
@@ -827,6 +888,7 @@ class DefaultChatRepository(
         val profileId = conversation?.providerProfileId
         if (!profileId.isNullOrBlank()) {
             val profile = profileDao.getProfileById(profileId)?.toDomain()
+            require(profile != null) { "绑定的服务商配置已删除，请重新选择服务商" }
             if (profile != null) {
                 val profileKey = if (context != null) ApiKeyStore(context, namespace = profile.id).read() else null
                 baseConfig = baseConfig.copy(
@@ -893,8 +955,8 @@ class DefaultChatRepository(
 
     private fun normalizeTitle(value: String): String = value.trim().ifEmpty { "新聊天" }
 
-    private suspend fun searchForConversation(id: String, config: ProviderConfig, query: String, previousQuery: String?): List<com.example.aichat.data.network.WebSearchResult> = coroutineScope {
-        val child = async(Dispatchers.IO, start = CoroutineStart.LAZY) { webSearchClient.search(query, config, previousQuery = previousQuery) }
+    private suspend fun searchForConversation(id: String, config: ProviderConfig, query: String, previousQuery: String?, onRequestText: (String) -> Unit): List<com.example.aichat.data.network.WebSearchResult> = coroutineScope {
+        val child = async(Dispatchers.IO, start = CoroutineStart.LAZY) { webSearchClient.search(query, config, previousQuery = previousQuery, onRequestText = onRequestText) }
         synchronized(activeRequestLock) { searchJob = child; searchingConversation.value = id }
         try {
             child.start()
@@ -974,7 +1036,9 @@ class DefaultChatRepository(
 
                 try {
                     dao.update(assistant.copy(status = MessageStatus.STREAMING).toEntity())
-                    client.streamChat(config, history, temperature).collect { event ->
+                    client.streamChatWithModelTracking(config, history, temperature) { attemptedModel ->
+                        knowledge.record(assistant.id)?.let { if (it.model != attemptedModel) knowledge.record(it.copy(model = attemptedModel)) }
+                    }.collect { event ->
                         when (event) {
                             is ChatStreamEvent.ThinkingDelta -> {
                                 thinkingText.append(event.text)

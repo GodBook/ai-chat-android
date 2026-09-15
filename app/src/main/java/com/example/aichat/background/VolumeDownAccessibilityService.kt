@@ -42,6 +42,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     private val volumeKeyPressedAt = LongArray(2)
     /** Blocks a second pair trigger while the user still holds both keys. */
     private var pairTriggerConsumed = false
+    private var consumedVolumeUp = false
     @Volatile private var captureJob: Job? = null
     @Volatile private var screenshotPending = false
     private var lastTriggerAt = 0L
@@ -74,6 +75,23 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            val ttsActive = app.container.ttsManager.playbackState.value.let { it.isPlaying || it.isPaused }
+            if (ttsActive && event.action == KeyEvent.ACTION_DOWN) {
+                app.container.ttsManager.stop()
+                consumedVolumeUp = true
+                volumeKeyPressedAt[SLOT_VOLUME_UP] = android.os.SystemClock.elapsedRealtime()
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_DOWN && consumedVolumeUp) {
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP && consumedVolumeUp) {
+                consumedVolumeUp = false
+                volumeKeyPressedAt[SLOT_VOLUME_UP] = 0L
+                return true
+            }
+        }
         if (!enabled) {
             resetVolumeKeyState()
             return false
@@ -131,6 +149,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     /** Handles both the volume key and the settings screen's manual test action. */
     internal fun captureFromTrigger(): Boolean {
+        app.container.ttsManager.stop()
         if (!enabled) return false
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             synchronized(captureLock) {
@@ -243,6 +262,9 @@ class VolumeDownAccessibilityService : AccessibilityService() {
                 } else {
                     showFeedback(answer, config)
                 }
+                if (config.screenshotAssistantEnabled && answer.isNotBlank()) {
+                    app.container.ttsManager.speak("screenshot_${System.currentTimeMillis()}", answer)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -301,6 +323,7 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         enabled = false
+        consumedVolumeUp = false
         resetVolumeKeyState()
         val runningJob = synchronized(captureLock) {
             screenshotPending = false

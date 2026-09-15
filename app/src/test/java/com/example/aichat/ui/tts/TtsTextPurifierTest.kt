@@ -35,6 +35,17 @@ class TtsTextPurifierTest {
     }
 
     @Test
+    fun `purify removes short answer machine markers`() {
+        val raw = "正确答案是A选项。\n[简答:A]"
+        val purified = TtsTextPurifier.purify(raw)
+        assertEquals("正确答案是A选项。", purified)
+
+        val raw2 = "该说法是错误的。\n[简答:错误]"
+        val purified2 = TtsTextPurifier.purify(raw2)
+        assertEquals("该说法是错误的。", purified2)
+    }
+
+    @Test
     fun `splitIntoSentences splits correctly on punctuation and newlines`() {
         val text = "你好！这是第一句。你想听更多吗？当然可以，没问题！\n下一段第一句。完结。"
         val sentences = TtsTextPurifier.splitIntoSentences(text)

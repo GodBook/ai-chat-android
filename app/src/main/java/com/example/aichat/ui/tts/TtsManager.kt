@@ -32,6 +32,7 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
     private var currentSentences: List<String> = emptyList()
     private var currentIndex: Int = 0
     private var activeMessageId: String? = null
+    private var pendingSpeak: Boolean = false
 
     init {
         tts = TextToSpeech(appContext, this)
@@ -47,6 +48,10 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
             ttsEngine.setSpeechRate(_playbackState.value.speechRate)
             setupProgressListener()
             _playbackState.value = _playbackState.value.copy(isReady = true)
+            if (pendingSpeak && currentSentences.isNotEmpty()) {
+                pendingSpeak = false
+                speakSentence(currentIndex)
+            }
         }
     }
 
@@ -78,7 +83,9 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
 
     fun speak(messageId: String, rawText: String) {
         if (!(_playbackState.value.isReady)) {
-            tts = TextToSpeech(appContext, this)
+            if (tts == null) {
+                tts = TextToSpeech(appContext, this)
+            }
         }
 
         stop()
@@ -100,7 +107,11 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
             currentSentenceText = sentences.first(),
         )
 
-        speakSentence(0)
+        if (_playbackState.value.isReady) {
+            speakSentence(0)
+        } else {
+            pendingSpeak = true
+        }
     }
 
     private fun speakSentence(index: Int) {
@@ -137,6 +148,7 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
     }
 
     fun stop() {
+        pendingSpeak = false
         tts?.stop()
         activeMessageId = null
         currentSentences = emptyList()

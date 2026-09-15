@@ -19,11 +19,15 @@ import kotlinx.serialization.json.Json
         ChatConversationEntity::class,
         ChatPersonaEntity::class,
         ProviderProfileEntity::class,
+        KnowledgeCardEntity::class,
+        BranchSelectionEntity::class,
+        ContextRecordEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
+    abstract fun knowledgeDao(): KnowledgeDao
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun chatConversationDao(): ChatConversationDao
     abstract fun chatPersonaDao(): ChatPersonaDao
@@ -192,6 +196,16 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS `knowledge_cards` (`id` TEXT NOT NULL, `conversationId` TEXT, `payload` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_knowledge_cards_conversationId` ON `knowledge_cards` (`conversationId`)")
+                database.execSQL("CREATE TABLE IF NOT EXISTS `conversation_branch_selections` (`conversationId` TEXT NOT NULL, `requestId` TEXT NOT NULL, `assistantMessageId` TEXT NOT NULL, PRIMARY KEY(`conversationId`, `requestId`))")
+                database.execSQL("CREATE TABLE IF NOT EXISTS `request_context_records` (`assistantMessageId` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `payload` TEXT NOT NULL, PRIMARY KEY(`assistantMessageId`))")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_request_context_records_conversationId` ON `request_context_records` (`conversationId`)")
+            }
+        }
+
         private fun insertDefaultSeedData(database: SupportSQLiteDatabase) {
             for (persona in BUILT_IN_PERSONAS) {
                 database.execSQL(
@@ -258,6 +272,7 @@ abstract class ChatDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
+                        MIGRATION_10_11,
                     )
                     .addCallback(CREATE_DEFAULT_CONVERSATION)
                     .build()

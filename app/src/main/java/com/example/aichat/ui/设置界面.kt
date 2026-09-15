@@ -452,10 +452,12 @@ internal fun SettingsScreen(
         Boolean,
         ScreenshotTrigger,
         Boolean,
+        Boolean,
     ) -> Result<Unit>,
     onBackgroundCaptureChanged: suspend (Boolean) -> Result<Unit>,
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
+    onScreenshotAssistantChanged: suspend (Boolean) -> Result<Unit> = { Result.success(Unit) },
     onAutoFallbackEnabledChanged: suspend (Boolean) -> Result<Unit>,
     onAutoCollapseThinkingChanged: suspend (Boolean) -> Result<Unit>,
     onModelPresetSelected: suspend (ModelPreset) -> Result<Unit>,
@@ -523,6 +525,9 @@ internal fun SettingsScreen(
     var defaultWebSearchEnabled by rememberSaveable(state.config.defaultWebSearchEnabled) {
         mutableStateOf(state.config.defaultWebSearchEnabled)
     }
+    var screenshotAssistantEnabled by rememberSaveable(state.config.screenshotAssistantEnabled) {
+        mutableStateOf(state.config.screenshotAssistantEnabled)
+    }
     var updateManifestUrl by rememberSaveable(state.updateManifestUrl) { mutableStateOf(state.updateManifestUrl) }
     var showKey by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -531,6 +536,7 @@ internal fun SettingsScreen(
     var updatingBackgroundCapture by remember { mutableStateOf(false) }
     var updatingOverlayAppearance by remember { mutableStateOf(false) }
     var updatingShortAnswerMode by remember { mutableStateOf(false) }
+    var updatingScreenshotAssistant by remember { mutableStateOf(false) }
     var updatingAutoFallback by remember { mutableStateOf(false) }
     var updatingScreenshotTrigger by remember { mutableStateOf(false) }
     var updatingDefaultWebSearch by remember { mutableStateOf(false) }
@@ -669,6 +675,7 @@ internal fun SettingsScreen(
                 autoFallbackEnabled,
                 screenshotTrigger,
                 autoCollapseThinking,
+                screenshotAssistantEnabled,
             )
                 .onSuccess {
                     error = null
@@ -1577,6 +1584,46 @@ internal fun SettingsScreen(
                                             }
                                     } finally {
                                         updatingShortAnswerMode = false
+                                    }
+                                }
+                            },
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("截图助手", fontWeight = FontWeight.Medium)
+                            Text(
+                                "AI 输出答案后后台自动语音播放回答内容；朗读过程中按音量上键可立刻结束语音，再次进行后台截图也会中断语音",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = screenshotAssistantEnabled,
+                            enabled = !saving && !updatingScreenshotAssistant,
+                            onCheckedChange = { requested ->
+                                val previous = screenshotAssistantEnabled
+                                screenshotAssistantEnabled = requested
+                                saved = false
+                                updatingScreenshotAssistant = true
+                                scope.launch {
+                                    try {
+                                        onScreenshotAssistantChanged(requested)
+                                            .onSuccess {
+                                                error = null
+                                                saved = true
+                                            }
+                                            .onFailure {
+                                                screenshotAssistantEnabled = previous
+                                                error = it.message ?: "截图助手设置保存失败"
+                                            }
+                                    } finally {
+                                        updatingScreenshotAssistant = false
                                     }
                                 }
                             },

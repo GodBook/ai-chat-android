@@ -156,6 +156,10 @@ internal fun ContactsScreen(
     onReorderConversationsInGroup: (List<String>) -> Unit = {},
     onTemporaryConversation: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    onOpenCards: () -> Unit = {},
+    onDeleteWithCards: (String, Boolean) -> Unit = { id, _ -> onDeleteConversation(id) },
+    onDeleteManyWithCards: (Set<String>, Boolean) -> Unit = { ids, _ -> onDeleteConversations(ids) },
+    cardConversationIds: Set<String> = emptySet(),
     deepSearchResults: List<MessageSearchResultItem> = emptyList(),
     isDeepSearching: Boolean = false,
     onDeepSearchQueryChange: (String) -> Unit = {},
@@ -180,6 +184,7 @@ internal fun ContactsScreen(
     var groupDraft by rememberSaveable { mutableStateOf("") }
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var deleteCards by rememberSaveable { mutableStateOf(true) }
     var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showBatchGroupDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -222,7 +227,8 @@ internal fun ContactsScreen(
 
     val onQuickDelete: (ChatConversation) -> Unit = { target ->
         commitPendingDelete()
-        pendingDeleteConversation = target
+        if (target.id in cardConversationIds) { deleteCards = true; deleteTarget = target }
+        else pendingDeleteConversation = target
         undoRemainingMillis = 2000L
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
     }
@@ -316,6 +322,7 @@ internal fun ContactsScreen(
                                     showCreateDialog = true
                                 },
                             )
+                            TextButton(onClick = onOpenCards) { Text("结论卡") }
                             IconButton(onClick = onOpenSettings) {
                                 Icon(Icons.Default.Settings, contentDescription = "设置")
                             }
@@ -800,12 +807,16 @@ internal fun ContactsScreen(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("删除聊天？") },
-            text = { Text("将删除“${target.title}”中的消息和图片，且无法恢复。") },
+            text = { Column {
+                Text("将删除“${target.title}”中的消息和图片，且无法恢复。")
+                Row { Checkbox(deleteCards, { deleteCards = it }); Text("同时删除结论卡", modifier = Modifier.padding(top = 12.dp)) }
+                Text("取消勾选后，卡片保留在全部结论卡中。")
+            } },
             confirmButton = {
                 TextButton(
                     onClick = {
                         deleteTarget = null
-                        onDeleteConversation(target.id)
+                        onDeleteWithCards(target.id, !deleteCards)
                     },
                 ) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
@@ -816,7 +827,10 @@ internal fun ContactsScreen(
         AlertDialog(
             onDismissRequest = { showBatchDeleteDialog = false },
             title = { Text("删除 ${selectedIds.size} 个会话？") },
-            text = { Text("将删除所选 ${selectedIds.size} 个会话中的全部消息和图片，且无法恢复。") },
+            text = { Column {
+                Text("将删除所选 ${selectedIds.size} 个会话中的全部消息和图片，且无法恢复。")
+                Row { Checkbox(deleteCards, { deleteCards = it }); Text("同时删除结论卡", modifier = Modifier.padding(top = 12.dp)) }
+            } },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -824,7 +838,7 @@ internal fun ContactsScreen(
                         showBatchDeleteDialog = false
                         isSelectionMode = false
                         selectedIds = emptySet()
-                        onDeleteConversations(targets)
+                        onDeleteManyWithCards(targets, !deleteCards)
                     },
                 ) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },

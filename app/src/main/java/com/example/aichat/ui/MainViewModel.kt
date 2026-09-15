@@ -1,5 +1,6 @@
 package com.example.aichat.ui
 
+import com.example.aichat.data.model.*
 import android.content.Context
 import android.net.Uri
 import android.content.Intent
@@ -102,6 +103,7 @@ sealed interface BackupRestoreUiState {
 }
 
 data class MainUiState(
+    val workbench: WorkbenchState = WorkbenchState(),
     val conversations: List<ChatConversation> = emptyList(),
     val conversationPreviews: Map<String, ChatMessage> = emptyMap(),
     val selectedConversationId: String? = null,
@@ -199,6 +201,11 @@ class MainViewModel(
     private val backupRestoreState = MutableStateFlow<BackupRestoreUiState>(BackupRestoreUiState.Idle)
     private val webSearchActive = MutableStateFlow<Boolean?>(null)
     private val selectedBranches = MutableStateFlow<Map<String, Int>>(emptyMap())
+    private val workbench = MutableStateFlow(WorkbenchState())
+    private val contextOptions = mutableMapOf<String, ContextOptions>()
+    private var previewJob: kotlinx.coroutines.Job? = null
+    private var previewGeneration = 0L
+    private var creatingContinuation = false
     private val conversationGeneration = AtomicLong(0)
     private val deepSearchQuery = MutableStateFlow("")
     private val deepSearchResults = MutableStateFlow<List<MessageSearchResultItem>>(emptyList())
@@ -234,9 +241,13 @@ class MainViewModel(
             repository.observeConversationPreviews(),
             selectedMessages,
             repository.observeAnyWorking(),
-            selectedBranches,
-        ) { conversations, previews, messages, anyWorking, branches ->
-            val resolvedMessages = resolveMessageBranches(messages, branches)
+            repository.observeBranchSelections(),
+        ) { conversations, previews, messages, anyWorking, savedBranches ->
+            val branchIndices = savedBranches.filter { it.conversationId == selection.selectedId }.associate { branch ->
+                branch.requestId to messages.filter { it.role == MessageRole.ASSISTANT && it.requestId == branch.requestId }.indexOfFirst { it.id == branch.assistantMessageId }
+            }.filterValues { it >= 0 }
+            selectedBranches.value = branchIndices
+            val resolvedMessages = resolveMessageBranches(messages, branchIndices)
             ConversationSnapshot(
                 conversations = conversations,
                 previews = previews,
@@ -342,10 +353,27 @@ class MainViewModel(
         state.copy(incomingShare = share)
     }.combine(sharedDraft) { state, draft ->
         state.copy(sharedDraft = draft)
+    }.combine(workbench) { state, value -> state.copy(workbench = if (state.isTemporary) WorkbenchState() else value)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
 
     init {
+        viewModelScope.launch {
+            repository.observeKnowledgeCards().collect { cards ->
+                val ids = cards.map { it.id }.toSet()
+                contextOptions.keys.toList().forEach { id -> contextOptions[id] = contextOptions.getValue(id).copy(cards = contextOptions.getValue(id).cards.mapNotNull { old -> cards.firstOrNull { it.id == old.id } }) }
+                workbench.update { it.copy(cards = cards, selectedCardIds = it.selectedCardIds.intersect(ids), revision = it.revision + 1) }
+            }
+        }
+        viewModelScope.launch {
+            selectedConversationId.collect { id ->
+                workbench.update { it.copy(plan = null, previewError = null, selectedCardIds = contextOptions[id]?.cards.orEmpty().map { c -> c.id }.toSet(), excludedIds = contextOptions[id]?.excludedUserIds.orEmpty()) }
+                if (id != null) {
+                    val saved = configStore.readContinuationDraft(id)
+                    if (saved != null && selectedConversationId.value == id) sharedDraft.value = com.example.aichat.data.attachment.SharedDraft(conversationId = id, text = saved)
+                }
+            }
+        }
         loadStorageStats()
         viewModelScope.launch {
             repository.recoverInterruptedMessages()
@@ -361,6 +389,127 @@ class MainViewModel(
                 }
             }
         }
+    }
+
+    fun refreshContext(text: String) {
+        if (temporary.state.value.id != null) return
+        val id = selectedConversationId.value ?: return
+        val options = contextOptions[id] ?: ContextOptions()
+        val body = DocumentText.compose(text, attachments.value.documents)
+        val images = selectedImagePaths.value
+        val generation = ++previewGeneration
+        previewJob?.cancel()
+        workbench.update { it.copy(plan = null, previewError = null) }
+        previewJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(180)
+            try {
+                val plan = repository.previewContext(id, body, images, options)
+                if (selectedConversationId.value == id && generation == previewGeneration) workbench.update { it.copy(plan = plan) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (generation == previewGeneration) workbench.update { it.copy(previewError = e.message ?: "无法读取上下文") } }
+        }
+    }
+    fun openContext() { workbench.update { it.copy(showContext = true) } }
+    fun openCards(all: Boolean = false) { workbench.update { it.copy(showCards = true, allCards = all) } }
+    fun closeWorkbench() { workbench.update { it.copy(showContext = false, showCards = false, editor = null, recordText = null, continuation = false) } }
+    fun toggleExcluded(userId: String) {
+        val id = selectedConversationId.value ?: return
+        if (uiState.value.isAnyWorking) return
+        val old = contextOptions[id] ?: ContextOptions()
+        val excluded = if (userId in old.excludedUserIds) old.excludedUserIds - userId else old.excludedUserIds + userId
+        contextOptions[id] = old.copy(excludedUserIds = excluded)
+        workbench.update { it.copy(excludedIds = excluded, revision = it.revision + 1) }
+    }
+    fun toggleCard(id: String) {
+        val conversationId = selectedConversationId.value ?: return
+        if (uiState.value.isAnyWorking || temporary.state.value.id != null) return
+        val old = contextOptions[conversationId] ?: ContextOptions()
+        val card = workbench.value.cards.firstOrNull { it.id == id } ?: return
+        val cards = if (old.cards.any { it.id == id }) old.cards.filterNot { it.id == id } else old.cards + card
+        try { ContextPlanner.withCards("", cards) } catch (e: Exception) { transientMessage.value = e.message; return }
+        contextOptions[conversationId] = old.copy(cards = cards)
+        workbench.update { it.copy(selectedCardIds = cards.map { c -> c.id }.toSet(), revision = it.revision + 1) }
+    }
+    fun editCard(card: KnowledgeCard) { workbench.update { it.copy(editor = card) } }
+    fun newCard(message: ChatMessage? = null) {
+        if (temporary.state.value.id != null) return
+        val now = System.currentTimeMillis()
+        val card = KnowledgeCard(java.util.UUID.randomUUID().toString(), selectedConversationId.value,
+            if (message == null) "用户记录" else uiState.value.selectedConversationTitle,
+            message?.id, message?.requestId, message?.text?.take(2_000).orEmpty(),
+            if (message == null) "" else "回答结论", message?.text.orEmpty(), createdAt = now, updatedAt = now)
+        workbench.update { it.copy(editor = card) }
+    }
+    fun saveCard(card: KnowledgeCard) {
+        viewModelScope.launch {
+            try {
+                val existing = workbench.value.cards.firstOrNull { it.id == card.id }
+                val source = card.sourceMessageId?.let { id -> repository.getAllMessages().firstOrNull { it.id == id } }
+                val excerpt = if (existing == null && source != null && card.body in source.text) card.body else card.sourceExcerpt
+                repository.saveKnowledgeCard(card.copy(sourceExcerpt = excerpt, revision = (existing?.revision ?: 0) + 1, updatedAt = System.currentTimeMillis()))
+                workbench.update { it.copy(editor = null) }
+                transientMessage.value = "结论卡已保存"
+            } catch (e: Exception) { transientMessage.value = e.message ?: "保存失败" }
+        }
+    }
+    fun deleteCard(id: String) {
+        viewModelScope.launch {
+            try { repository.deleteKnowledgeCard(id); transientMessage.value = "卡片已删除；已发送的聊天正文与外部备份仍保留" }
+            catch (e: Exception) { transientMessage.value = e.message }
+        }
+    }
+    fun showContextRecord(id: String) {
+        viewModelScope.launch {
+            try {
+                val record = repository.getContextRecord(id)
+                val messages = repository.getAllMessages().associateBy { it.id }
+                val text = if (record == null) "此回答未记录上下文" else buildString {
+                    append("模型：${record.model}\n文字：${record.characterCount} 字符 · 图片：${record.imageCount} 张\n\n角色设定\n${record.systemPrompt.ifBlank { "无" }}\n")
+                    record.entries.forEach { entry ->
+                        append("\n${entry.reason ?: "已携带"}\n用户：${messages[entry.userId]?.text ?: "来源已删除"}\nAI：${messages[entry.assistantId]?.text ?: "来源已删除或未完成"}\n")
+                    }
+                    append("\n本次问题\n${messages[record.userMessageId]?.text ?: "来源已删除"}\n")
+                    if (record.cards.isNotEmpty()) append("\n当次结论卡\n${knowledgeMarkdown(record.cards)}\n")
+                    if (record.searchEnabled && record.searchQuery == null) append("\n联网搜索未完成，尚无最终搜索资料。\n")
+                    if (record.searchQuery != null) append("\n实际发送给搜索服务的查询\n${record.searchQuery}\n最终搜索资料\n${record.searchContext}\n")
+                }
+                workbench.update { it.copy(recordText = text) }
+            } catch (e: Exception) { transientMessage.value = e.message }
+        }
+    }
+    fun startContinuation() { workbench.update { it.copy(continuation = true) } }
+    fun createContinuation(goal: String, onCreated: () -> Unit) {
+        if (creatingContinuation || uiState.value.isAnyWorking) return
+        val sourceId = selectedConversationId.value ?: return
+        val cards = contextOptions[sourceId]?.cards.orEmpty()
+        if (cards.isEmpty()) { transientMessage.value = "请先选择结论卡"; return }
+        creatingContinuation = true
+        viewModelScope.launch {
+            try {
+                val source = repository.getConversation(sourceId) ?: error("来源聊天已删除")
+                // Validate the effective service before creating anything.
+                repository.previewContext(sourceId, goal, emptyList(), ContextOptions(cards = cards))
+                if (source.providerProfileId != null && uiState.value.providerProfiles.none { it.id == source.providerProfileId }) error("来源服务配置不可用，请先选择服务商")
+                val body = ContextPlanner.withCards(goal.ifBlank { "请根据以下成果继续推进。" }, cards)
+                val created = repository.createConversation("续聊 · ${source.title.take(30)}", source.groupName)
+                try {
+                    repository.setConversationProviderProfile(created.id, source.providerProfileId)
+                    repository.setConversationPersona(created.id, source.personaId)
+                    repository.setConversationContextWindowLimit(created.id, source.contextWindowLimit)
+                    configStore.saveContinuationDraft(created.id, body)
+                } catch (e: Exception) { repository.deleteConversation(created.id); throw e }
+                selectConversation(created.id)
+                sharedDraft.value = com.example.aichat.data.attachment.SharedDraft(conversationId = created.id, text = body)
+                closeWorkbench()
+                onCreated()
+            } catch (e: Exception) { transientMessage.value = e.message ?: "创建续聊失败" }
+            finally { creatingContinuation = false }
+        }
+    }
+    fun persistContinuationDraft(text: String) {
+        val id = selectedConversationId.value ?: return
+        if (temporary.state.value.id != null) return
+        viewModelScope.launch { if (configStore.readContinuationDraft(id) != null) configStore.saveContinuationDraft(id, text) }
     }
 
     fun clearMessage() {
@@ -514,7 +663,8 @@ class MainViewModel(
         }
     }
 
-    fun deleteConversation(id: String) {
+    fun deleteConversation(id: String) = deleteConversationWithCards(id, false)
+    fun deleteConversationWithCards(id: String, keepCards: Boolean) {
         val deletingSelected = id == selectedConversationId.value
         val generation = if (deletingSelected) {
             conversationGeneration.incrementAndGet()
@@ -528,7 +678,7 @@ class MainViewModel(
         }
         viewModelScope.launch {
             try {
-                if (!repository.deleteConversation(id)) {
+                if (!repository.deleteConversationConfigured(id, keepCards)) {
                     if (deletingSelected) restoreComposerImages(draftImages, id, generation)
                     transientMessage.value = "聊天不存在"
                     return@launch
@@ -575,7 +725,8 @@ class MainViewModel(
         }
     }
 
-    fun deleteConversations(ids: Set<String>) {
+    fun deleteConversations(ids: Set<String>) = deleteConversationsWithCards(ids, false)
+    fun deleteConversationsWithCards(ids: Set<String>, keepCards: Boolean) {
         if (ids.isEmpty()) return
         val currentSelectedId = selectedConversationId.value
         val deletingSelected = currentSelectedId != null && currentSelectedId in ids
@@ -591,7 +742,7 @@ class MainViewModel(
         }
         viewModelScope.launch {
             try {
-                val count = repository.deleteConversations(ids)
+                val count = repository.deleteConversationsConfigured(ids, keepCards)
                 if (count == 0) {
                     if (deletingSelected) {
                         restoreComposerImages(draftImages, currentSelectedId!!, generation)
@@ -720,13 +871,14 @@ class MainViewModel(
         }
         if (uiState.value.isWorking) return
         val images = selectedImagePaths.value
-        if (outgoingText.isBlank() && images.isEmpty()) {
+        if (outgoingText.isBlank() && images.isEmpty() && workbench.value.selectedCardIds.isEmpty()) {
             transientMessage.value = "请输入消息或选择图片"
             return
         }
         val isWebSearch = uiState.value.webSearchActive
         val generation = conversationGeneration.get()
         val conversationId = selectedConversationId.value
+        val options = contextOptions[conversationId] ?: ContextOptions()
         draftToRestore.value = null
         selectedImagePaths.value = emptyList()
         attachments.value = AttachmentComposerState()
@@ -737,10 +889,18 @@ class MainViewModel(
                     targetId = it.id
                     selectedConversationId.value = it.id
                 }.id
-                repository.sendMessage(resolvedTargetId, outgoingText, images, webSearch = isWebSearch)
+                repository.sendPlannedMessage(resolvedTargetId, outgoingText, images, webSearch = isWebSearch, options = options)
+                contextOptions.remove(resolvedTargetId)
+                configStore.saveContinuationDraft(resolvedTargetId, null)
+                workbench.update { it.copy(selectedCardIds = emptySet(), excludedIds = emptySet(), revision = it.revision + 1) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
+                if ((failure as? ChatClientException)?.requestWasPersisted == true && targetId != null) {
+                    contextOptions.remove(targetId)
+                    configStore.saveContinuationDraft(targetId, null)
+                    workbench.update { it.copy(selectedCardIds = emptySet(), excludedIds = emptySet(), revision = it.revision + 1) }
+                }
                 if ((failure as? ChatClientException)?.requestWasPersisted != true) {
                     if (conversationGeneration.get() == generation && selectedConversationId.value == targetId) {
                         selectedImagePaths.value = (images + selectedImagePaths.value).distinct()
@@ -807,7 +967,16 @@ class MainViewModel(
     }
 
     fun switchMessageBranch(requestId: String, newIndex: Int) {
-        selectedBranches.update { it + (requestId to newIndex) }
+        val id = selectedConversationId.value ?: return
+        if (uiState.value.isAnyWorking) return
+        viewModelScope.launch {
+            try {
+                val branches = repository.observeMessages(id).first().filter { it.role == MessageRole.ASSISTANT && it.requestId == requestId }
+                val target = branches.getOrNull(newIndex) ?: return@launch
+                repository.selectBranch(id, requestId, target.id)
+                transientMessage.value = "后续提问将使用此版本"
+            } catch (e: Exception) { transientMessage.value = e.message }
+        }
     }
 
     fun regenerate(messageId: String) {
@@ -897,6 +1066,7 @@ class MainViewModel(
         autoFallbackEnabled: Boolean = true,
         screenshotTrigger: ScreenshotTrigger = DEFAULT_SCREENSHOT_TRIGGER,
         autoCollapseThinking: Boolean = true,
+        screenshotAssistantEnabled: Boolean = false,
     ): Result<Unit> {
         val normalizedUrl = baseUrl.trim().removeSuffix("/")
         val url = runCatching { URI(normalizedUrl) }.getOrNull()
@@ -937,6 +1107,8 @@ class MainViewModel(
                 screenshotTrigger = screenshotTrigger,
                 autoCollapseThinking = autoCollapseThinking,
                 themeColor = current.themeColor,
+                defaultWebSearchEnabled = current.defaultWebSearchEnabled,
+                screenshotAssistantEnabled = screenshotAssistantEnabled,
             )
             updateConfigStore.setManifestUrl(normalizedUpdateUrl)
             apiKeyAvailable.value = apiKeyStore.hasKey()
@@ -966,6 +1138,12 @@ class MainViewModel(
     suspend fun setShortAnswerModeEnabled(enabled: Boolean): Result<Unit> = runCatching {
         val current = configStore.read()
         configStore.update(current.copy(shortAnswerModeEnabled = enabled))
+    }
+
+    /** Persists the screenshot assistant switch immediately. */
+    suspend fun setScreenshotAssistantEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        val current = configStore.read()
+        configStore.update(current.copy(screenshotAssistantEnabled = enabled))
     }
 
     /** Persists the auto fallback switch immediately, without saving the rest of the form. */
@@ -1246,6 +1424,7 @@ class MainViewModel(
                 imageDirectory = imgDir,
                 appVersion = BuildConfig.VERSION_NAME,
                 versionCode = BuildConfig.VERSION_CODE.toLong(),
+                knowledge = repository.getKnowledgeBackup(),
             )
             result.fold(
                 onSuccess = { manifest ->
@@ -1273,6 +1452,7 @@ class MainViewModel(
                 inputUri = sourceUri,
                 imageDirectory = imgDir,
                 existingConversationIds = existing,
+                onInsertKnowledge = { convs, msgs, knowledge -> repository.restoreKnowledgeData(convs, msgs, knowledge) },
                 onInsertData = { convs, msgs ->
                     repository.restoreBackupData(convs, msgs)
                 },
@@ -1479,7 +1659,8 @@ class MainViewModel(
                 if (target == null) { transientMessage.value = "消息已删除，请重新搜索"; return@launch }
                 if (target.role == MessageRole.ASSISTANT && target.requestId != null) {
                     val branches = raw.filter { it.role == MessageRole.ASSISTANT && it.requestId == target.requestId }
-                    selectedBranches.update { it + (target.requestId to branches.indexOfFirst { it.id == messageId }.coerceAtLeast(0)) }
+                    repository.selectBranch(conversationId, target.requestId, messageId)
+                    transientMessage.value = "后续提问将使用此版本"
                 }
                 if (conversationId != selectedConversationId.value) {
                     conversationGeneration.incrementAndGet()

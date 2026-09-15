@@ -41,6 +41,7 @@ class ConfigStoreTest {
         assertEquals(DEFAULT_OVERLAY_BACKGROUND_COLOR, config.overlayBackgroundColor)
         assertFalse(config.overlayGlassEnabled)
         assertFalse(config.shortAnswerModeEnabled)
+        assertFalse(config.screenshotAssistantEnabled)
         assertEquals(DEFAULT_SCREENSHOT_TRIGGER, config.screenshotTrigger)
     }
 
@@ -83,6 +84,14 @@ class ConfigStoreTest {
         assertEquals("https://api.example.test/v1", config.baseUrl)
         assertEquals("vision-model", config.model)
         assertEquals("保留这条提示词", config.screenshotPrompt)
+    }
+
+    @Test
+    fun screenshotAssistantUpdatesImmediately() = runBlocking {
+        store.updateScreenshotAssistantEnabled(true)
+        assertTrue(store.read().screenshotAssistantEnabled)
+        store.updateScreenshotAssistantEnabled(false)
+        assertFalse(store.read().screenshotAssistantEnabled)
     }
 
     @Test

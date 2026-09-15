@@ -184,8 +184,14 @@ internal fun ChatScreen(
     onSearchFilter: (com.example.aichat.data.model.MessageSearchFilter) -> Unit = {},
     onLoadMoreSearch: () -> Unit = {},
     onSearchJump: (String, String) -> Unit = { _, _ -> },
+    onRefreshContext: (String) -> Unit = {},
+    onOpenContext: () -> Unit = {},
+    onOpenCards: () -> Unit = {},
+    onSaveCard: (ChatMessage) -> Unit = {},
+    onContextRecord: (String) -> Unit = {},
+    onPersistDraft: (String) -> Unit = {},
 ) {
-    var draft by if (state.isTemporary) remember(state.selectedConversationId) { mutableStateOf("") } else rememberSaveable { mutableStateOf("") }
+    var draft by if (state.isTemporary) remember(state.selectedConversationId) { mutableStateOf("") } else rememberSaveable(state.selectedConversationId) { mutableStateOf("") }
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
     var messageToDelete by remember(state.selectedConversationId) { mutableStateOf<String?>(null) }
     var messageToEdit by remember(state.selectedConversationId) { mutableStateOf<ChatMessage?>(null) }
@@ -202,6 +208,16 @@ internal fun ChatScreen(
         onSearchQuery("")
     }
 
+    val contextDraft = if (quotedMessage != null) {
+        val q = quotedMessage!!
+        val sender = if (q.role == MessageRole.USER) "用户" else "AI"
+        "> [引用 $sender]: ${q.text.lines().take(5).joinToString("\n> ") { it.take(200) }}\n\n${draft.trim()}"
+    } else draft.trim().ifBlank { if (state.workbench.selectedCardIds.isNotEmpty()) "请根据选定结论卡继续分析。" else "" }
+    LaunchedEffect(contextDraft, state.selectedConversationId, state.messages.map { it.id to it.status },
+        state.attachments, state.selectedImagePaths, state.activePersona, state.activeProviderProfile,
+        state.config, state.workbench.revision, state.conversations) {
+        if (!state.isTemporary) onRefreshContext(contextDraft)
+    }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var shouldFollowTail by remember { mutableStateOf(true) }
@@ -422,6 +438,8 @@ internal fun ChatScreen(
                             onDismissRequest = { showMoreMenu = false },
                         ) {
                             if (!state.isTemporary) {
+                                DropdownMenuItem(text = { Text("结论卡") }, onClick = { showMoreMenu = false; onOpenCards() })
+                                DropdownMenuItem(text = { Text("本次上下文") }, onClick = { showMoreMenu = false; onOpenContext() })
                                 DropdownMenuItem(text = { Text("搜索当前聊天") }, enabled = !state.isAnyWorking,
                                     onClick = {
                                         showMoreMenu = false
@@ -519,7 +537,7 @@ internal fun ChatScreen(
                 state.messages.lastOrNull { it.role == MessageRole.USER }
             }
             val handleSend: () -> Unit = {
-                val cleanDraft = draft.trim()
+                val cleanDraft = draft.trim().ifBlank { if (state.workbench.selectedCardIds.isNotEmpty()) "请根据选定结论卡继续分析。" else "" }
                 val fullText = if (quotedMessage != null) {
                     val q = quotedMessage!!
                     val senderLabel = if (q.role == MessageRole.USER) "用户" else "AI"
@@ -556,8 +574,15 @@ internal fun ChatScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
+            if (!state.isTemporary) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = onOpenContext, modifier = Modifier.weight(1f)) {
+                    Text(state.workbench.plan?.let { "上下文 · ${it.includedRounds} 轮 · ${it.cards.size} 张卡" } ?: if (state.workbench.previewError != null) "上下文 · 请检查" else "上下文 · 计算中", maxLines = 1)
+                }
+                TextButton(onClick = onOpenCards) { Text("结论卡") }
+            }
             Composer(
                 draft = draft,
+                hasSelectedCards = state.workbench.selectedCardIds.isNotEmpty(),
                 files = state.attachments.documents,
                 importingFiles = state.attachments.importing,
                 onRemoveDocument = onRemoveDocument,
@@ -570,7 +595,7 @@ internal fun ChatScreen(
                 webSearchActive = state.webSearchActive,
                 quotedMessage = quotedMessage,
                 lastUserMessage = lastUserMessage,
-                onDraftChange = { draft = it; onSharedDraftConsumed() },
+                onDraftChange = { draft = it; onSharedDraftConsumed(); onPersistDraft(it) },
                 onCancelQuote = { quotedMessage = null },
                 onEditLastMessage = {
                     lastUserMessage?.let { lastMsg ->
@@ -625,6 +650,8 @@ internal fun ChatScreen(
                                 onRetry = { onRetry(message.id) },
                                 onRegenerate = { onRegenerate(message.id) },
                                 onDelete = { messageToDelete = message.id },
+                                onSaveCard = if (state.isTemporary) null else ({ onSaveCard(message) }),
+                                onContextRecord = if (state.isTemporary) null else ({ onContextRecord(message.id) }),
                                 onEditPrompt = {
                                     messageToEdit = message
                                 },
@@ -696,7 +723,7 @@ internal fun ChatScreen(
         AlertDialog(
             onDismissRequest = { messageToDelete = null },
             title = { Text("删除此条消息？") },
-            text = { Text("删除后该条记录无法恢复。") },
+            text = { Text("删除后该条记录无法恢复；独立保存的结论卡仍会保留。") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1172,6 +1199,7 @@ private fun SlashCommandSuggestions(
 @Composable
 private fun Composer(
     draft: String,
+    hasSelectedCards: Boolean = false,
     files: List<com.example.aichat.data.attachment.DocumentAttachment>,
     importingFiles: Boolean,
     onPickDocument: () -> Unit,
@@ -1371,7 +1399,7 @@ private fun Composer(
                     }
                 },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (!isWorking && !importingFiles && (draft.isNotBlank() || selectedImages.isNotEmpty() || files.isNotEmpty())) onSend() }),
+                keyboardActions = KeyboardActions(onSend = { if (!isWorking && !importingFiles && (draft.isNotBlank() || selectedImages.isNotEmpty() || files.isNotEmpty() || hasSelectedCards)) onSend() }),
             )
 
             Row(
@@ -1453,7 +1481,7 @@ private fun Composer(
 
                 FilledIconButton(
                     onClick = if (isWorking) onStop else onSend,
-                    enabled = isWorking || (!importingFiles && (draft.isNotBlank() || selectedImages.isNotEmpty() || files.isNotEmpty())),
+                    enabled = isWorking || (!importingFiles && (draft.isNotBlank() || selectedImages.isNotEmpty() || files.isNotEmpty() || hasSelectedCards)),
                     modifier = Modifier.size(40.dp),
                 ) {
                     AnimatedContent(
@@ -1494,6 +1522,8 @@ private fun MessageBubble(
     onEditPrompt: (String) -> Unit,
     onQuoteMessage: () -> Unit,
     onSwitchBranch: (Int) -> Unit = {},
+    onSaveCard: (() -> Unit)? = null,
+    onContextRecord: (() -> Unit)? = null,
 ) {
     val isUser = message.role == MessageRole.USER
     val clipboard = LocalClipboardManager.current
@@ -1639,6 +1669,17 @@ private fun MessageBubble(
                             fontSize = 10.sp,
                         )
                     }
+                }
+            }
+        }
+
+        if (!isUser && onContextRecord != null) {
+            var menu by remember { mutableStateOf(false) }
+            Box(Modifier.padding(start = 38.dp)) {
+                TextButton({ menu = true }) { Text("更多") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (message.status == MessageStatus.SENT && onSaveCard != null) DropdownMenuItem(text = { Text("保存结论卡") }, onClick = { menu = false; onSaveCard() })
+                    DropdownMenuItem(text = { Text("查看本次上下文") }, onClick = { menu = false; onContextRecord() })
                 }
             }
         }

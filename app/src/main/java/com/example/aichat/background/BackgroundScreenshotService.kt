@@ -132,6 +132,7 @@ class BackgroundScreenshotService : Service() {
     }
 
     private fun requestCapture() {
+        app.container.ttsManager.stop()
         if (captureJob?.isActive == true) return
         val job = serviceScope.launch(start = CoroutineStart.LAZY) {
             try {
@@ -162,6 +163,9 @@ class BackgroundScreenshotService : Service() {
                         )
                     }
                     if (!shown && !config.shortAnswerModeEnabled) notifyStatus(answer)
+                    if (config.screenshotAssistantEnabled && answer.isNotBlank()) {
+                        app.container.ttsManager.speak("screenshot_${System.currentTimeMillis()}", answer)
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {

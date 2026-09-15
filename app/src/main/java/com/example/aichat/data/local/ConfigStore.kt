@@ -32,6 +32,14 @@ private val Context.providerConfigDataStore: DataStore<Preferences> by preferenc
 class ConfigStore(context: Context) {
     private val dataStore = context.applicationContext.providerConfigDataStore
 
+    suspend fun readContinuationDraft(id: String): String? = dataStore.data.first()[stringPreferencesKey("continuation_draft_$id")]
+    suspend fun saveContinuationDraft(id: String, text: String?) {
+        dataStore.edit { values ->
+            val key = stringPreferencesKey("continuation_draft_$id")
+            if (text == null) values.remove(key) else values[key] = text
+        }
+    }
+
     val config: Flow<ProviderConfig> = dataStore.data.map { preferences ->
         ProviderConfig(
             baseUrl = preferences[BASE_URL] ?: DEFAULT_BASE_URL,
@@ -49,6 +57,7 @@ class ConfigStore(context: Context) {
             autoCollapseThinking = preferences[AUTO_COLLAPSE_THINKING] ?: true,
             themeColor = preferences[THEME_COLOR] ?: DEFAULT_THEME_COLOR,
             defaultWebSearchEnabled = preferences[DEFAULT_WEB_SEARCH_ENABLED] ?: false,
+            screenshotAssistantEnabled = preferences[SCREENSHOT_ASSISTANT_ENABLED] ?: false,
         )
     }
 
@@ -72,6 +81,7 @@ class ConfigStore(context: Context) {
         autoCollapseThinking: Boolean = true,
         themeColor: String = DEFAULT_THEME_COLOR,
         defaultWebSearchEnabled: Boolean = false,
+        screenshotAssistantEnabled: Boolean = false,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -87,6 +97,7 @@ class ConfigStore(context: Context) {
             preferences[AUTO_COLLAPSE_THINKING] = autoCollapseThinking
             preferences[THEME_COLOR] = themeColor
             preferences[DEFAULT_WEB_SEARCH_ENABLED] = defaultWebSearchEnabled
+            preferences[SCREENSHOT_ASSISTANT_ENABLED] = screenshotAssistantEnabled
         }
     }
 
@@ -104,11 +115,17 @@ class ConfigStore(context: Context) {
         autoCollapseThinking = config.autoCollapseThinking,
         themeColor = config.themeColor,
         defaultWebSearchEnabled = config.defaultWebSearchEnabled,
+        screenshotAssistantEnabled = config.screenshotAssistantEnabled,
     )
 
     /** Updates default web search enabled immediately. */
     suspend fun updateDefaultWebSearchEnabled(enabled: Boolean) {
         dataStore.edit { preferences -> preferences[DEFAULT_WEB_SEARCH_ENABLED] = enabled }
+    }
+
+    /** Updates screenshot assistant enabled immediately. */
+    suspend fun updateScreenshotAssistantEnabled(enabled: Boolean) {
+        dataStore.edit { preferences -> preferences[SCREENSHOT_ASSISTANT_ENABLED] = enabled }
     }
 
     /** Updates app theme color immediately. */
@@ -177,5 +194,6 @@ class ConfigStore(context: Context) {
         val THEME_COLOR = stringPreferencesKey("theme_color")
         val COLLAPSED_GROUPS = stringSetPreferencesKey("collapsed_groups")
         val DEFAULT_WEB_SEARCH_ENABLED = booleanPreferencesKey("default_web_search_enabled")
+        val SCREENSHOT_ASSISTANT_ENABLED = booleanPreferencesKey("screenshot_assistant_enabled")
     }
 }
