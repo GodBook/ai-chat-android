@@ -75,18 +75,18 @@ class ScreenshotOverlayManager(context: Context) {
             gravity = Gravity.TOP
             setBackgroundColor(Color.TRANSPARENT)
         }
-        val rowHeight = dp(SHORT_BOX_HEIGHT_DP)
+        val rowHeight = dp(19) // Preserve the original vertical center and top-edge placement.
         for (index in 0 until sections) {
             val cell = FrameLayout(appContext)
             if (index in selected) {
                 val box = View(appContext).apply {
-                    background = roundedBackground(Color.rgb(128, 128, 128), 1)
+                    background = roundedBackground(Color.rgb(210, 210, 210), 1)
                 }
                 cell.addView(
                     box,
                     FrameLayout.LayoutParams(
                         dp(SHORT_BOX_WIDTH_DP).coerceAtMost(sectionWidth(sections)),
-                        rowHeight,
+                        dp(SHORT_BOX_HEIGHT_DP),
                         Gravity.CENTER,
                     ),
                 )
@@ -559,8 +559,8 @@ class ScreenshotOverlayManager(context: Context) {
     private companion object {
         const val DISPLAY_DURATION_MS = 20_000L
         const val SHORT_DISPLAY_DURATION_MS = 1_000L
-        const val SHORT_BOX_WIDTH_DP = 32
-        const val SHORT_BOX_HEIGHT_DP = 19
+        const val SHORT_BOX_WIDTH_DP = 20
+        const val SHORT_BOX_HEIGHT_DP = 10
         const val MIN_CHOICE_SECTIONS = 4
         const val JUDGMENT_SECTIONS = 2
         const val ENTER_ANIMATION_MS = 180L

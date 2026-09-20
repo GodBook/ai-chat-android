@@ -76,11 +76,9 @@ object BackgroundScreenshotManager {
     /** Requests a capture through the platform-appropriate screenshot path. */
     fun captureNow(context: Context): Boolean {
         (context.applicationContext as? com.example.aichat.AiChatApplication)?.container?.ttsManager?.stop()
-        if (usesAccessibilityScreenshot) {
-            return runningAccessibilityService?.captureFromTrigger() == true
-        }
-        captureWithProjection(context)
-        return true
+        // The listener owns the current backend preference, including on Android 10.
+        // If it is disconnected, never guess a backend or unexpectedly start projection.
+        return runningAccessibilityService?.captureFromTrigger() == true
     }
 
     /** Android 10 fallback, where AccessibilityService.takeScreenshot() is unavailable. */

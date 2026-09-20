@@ -48,6 +48,7 @@ fun TtsFloatingPlayer(
     onCycleRate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (playbackState.voiceOnly) return
     val isVisible = playbackState.isPlaying || playbackState.isPaused
 
     AnimatedVisibility(

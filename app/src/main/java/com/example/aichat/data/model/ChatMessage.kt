@@ -192,6 +192,10 @@ data class ProviderConfig(
     val defaultWebSearchEnabled: Boolean = false,
     /** Enables automatic TTS voice playback of AI screenshot answers in background. */
     val screenshotAssistantEnabled: Boolean = false,
+    /** Suppresses screenshot answer UI and reads answers/errors aloud. */
+    val screenshotVoiceOnlyEnabled: Boolean = false,
+    /** Explicit opt-in to the device's su/screencap capture path. */
+    val rootScreenshotEnabled: Boolean = false,
 )
 
 /** A message in the provider request, before it is encoded as JSON. */

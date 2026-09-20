@@ -15,6 +15,7 @@ import java.util.Locale
 
 data class TtsPlaybackState(
     val isPlaying: Boolean = false,
+    val voiceOnly: Boolean = false,
     val isPaused: Boolean = false,
     val currentMessageId: String? = null,
     val currentSentenceIndex: Int = 0,
@@ -131,8 +132,9 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
         })
     }
 
-    fun speak(messageId: String, rawText: String) {
+    fun speak(messageId: String, rawText: String, voiceOnly: Boolean = false) {
         stop()
+        _playbackState.value = _playbackState.value.copy(voiceOnly = voiceOnly)
 
         val purified = TtsTextPurifier.purify(rawText)
         val sentences = TtsTextPurifier.splitIntoSentences(purified)
@@ -189,6 +191,12 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
         }
     }
 
+    fun hideScreenshotPlayback() {
+        if (_playbackState.value.currentMessageId?.startsWith("screenshot_") == true) {
+            _playbackState.value = _playbackState.value.copy(voiceOnly = true)
+        }
+    }
+
     fun pause() {
         if (_playbackState.value.isPlaying) {
             pendingSpeak = false
@@ -229,6 +237,7 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
     }
 
     private fun fail(message: String, resetEngine: Boolean = false) {
+        val allowVisualFeedback = !_playbackState.value.voiceOnly
         val notify = activeMessageId != null || _playbackState.value.isPlaying
         stop()
         if (resetEngine) {
@@ -242,7 +251,7 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
             errorMessage = message,
         )
         // Initialization runs at app startup; only show errors for an actual playback request.
-        if (notify || !resetEngine) Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+        if (allowVisualFeedback && (notify || !resetEngine)) Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
     }
 
     fun setSpeechRate(rate: Float) {

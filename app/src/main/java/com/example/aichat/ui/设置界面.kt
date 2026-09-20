@@ -460,6 +460,8 @@ internal fun SettingsScreen(
     onOverlayAppearanceChanged: suspend (String, Boolean) -> Result<Unit>,
     onShortAnswerModeChanged: suspend (Boolean) -> Result<Unit>,
     onScreenshotAssistantChanged: suspend (Boolean) -> Result<Unit> = { Result.success(Unit) },
+    onRootScreenshotEnabledChanged: suspend (Boolean) -> Result<Unit> = { Result.success(Unit) },
+    onScreenshotVoiceOnlyEnabledChanged: suspend (Boolean) -> Result<Unit> = { Result.success(Unit) },
     onAutoFallbackEnabledChanged: suspend (Boolean) -> Result<Unit>,
     onAutoCollapseThinkingChanged: suspend (Boolean) -> Result<Unit>,
     onModelPresetSelected: suspend (ModelPreset) -> Result<Unit>,
@@ -565,7 +567,9 @@ internal fun SettingsScreen(
     val accessibilityPermissionGranted = remember(permissionRefresh) {
         BackgroundScreenshotManager.isAccessibilityServiceEnabled(context)
     }
-    val usesAccessibilityScreenshot = BackgroundScreenshotManager.usesAccessibilityScreenshot
+    val voiceOnly = state.config.screenshotVoiceOnlyEnabled
+    val rootCapture = state.config.rootScreenshotEnabled
+    val usesAccessibilityScreenshot = BackgroundScreenshotManager.usesAccessibilityScreenshot || rootCapture
     val screenshotPermissionGranted = if (usesAccessibilityScreenshot) {
         accessibilityPermissionGranted
     } else {
@@ -578,7 +582,7 @@ internal fun SettingsScreen(
     val notificationPermissionGranted = !notificationPermissionRequired ||
         hasPostNotificationsPermission(context)
     val backgroundPermissionsReady = screenshotPermissionGranted &&
-        overlayPermissionGranted && accessibilityPermissionGranted && notificationPermissionGranted
+        (voiceOnly || overlayPermissionGranted) && accessibilityPermissionGranted && notificationPermissionGranted
 
     fun persistBackgroundCaptureChange(requested: Boolean, previous: Boolean) {
         backgroundCaptureEnabled = requested
@@ -1634,6 +1638,58 @@ internal fun SettingsScreen(
                         )
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("纯语音播报", fontWeight = FontWeight.Medium)
+                            Text("开启后只朗读回答与错误，不显示回答悬浮窗、简版方块或播放器；无需悬浮窗权限。优先于简版模式，音量上键停止。历史会话仍保留。", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        var updating by remember { mutableStateOf(false) }
+                        Switch(
+                            checked = state.config.screenshotVoiceOnlyEnabled,
+                            enabled = !saving && !updating,
+                            onCheckedChange = { requested ->
+                                updating = true
+                                scope.launch {
+                                    try {
+                                        onScreenshotVoiceOnlyEnabledChanged(requested)
+                                            .onSuccess { error = null }
+                                            .onFailure { error = it.message ?: "设置保存失败" }
+                                    } finally { updating = false }
+                                }
+                            },
+                        )
+                    }
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Root 截图", fontWeight = FontWeight.Medium)
+                            Text("使用已授权的 Root 截图通道；首次测试请在 Root 管理器中授权。失败时不自动切换其他截图方式。不能保证不被检测，仍需音量监听权限。", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        var updating by remember { mutableStateOf(false) }
+                        Switch(
+                            checked = state.config.rootScreenshotEnabled,
+                            enabled = !saving && !updating,
+                            onCheckedChange = { requested ->
+                                updating = true
+                                scope.launch {
+                                    try {
+                                        onRootScreenshotEnabledChanged(requested)
+                                            .onSuccess { error = null }
+                                            .onFailure { error = it.message ?: "设置保存失败" }
+                                    } finally { updating = false }
+                                }
+                            },
+                        )
+                    }
+                    HorizontalDivider()
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = {
                             ttsManager.speak("speech_test", "语音测试成功，截图回答将通过媒体音量播放。")
@@ -1712,7 +1768,11 @@ internal fun SettingsScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text(
-                                if (usesAccessibilityScreenshot) {
+                                if (rootCapture) {
+                                    "Root 模式仍需开启音量监听。请先测试并完成 Root 授权；无法保证截图行为不被其他软件检测。"
+                                } else if (voiceOnly) {
+                                    "纯语音模式无需悬浮窗权限。请开启音量监听；Android 10 普通截图仍需屏幕捕获授权并保留系统服务通知。"
+                                } else if (usesAccessibilityScreenshot) {
                                     "开关会立即保存，只会由你手动关闭。请开启悬浮窗和音量监听，并在系统无障碍设置中选择“AI BOTOY”。Android 11 及以上由无障碍服务直接截图，不需要单独授权屏幕录制。"
                                 } else {
                                     "开关会立即保存，只会由你手动关闭。Android 10 还需授权屏幕捕获、悬浮窗和音量监听。屏幕捕获授权在应用进程被系统结束后需要重新授予。"
@@ -1721,7 +1781,11 @@ internal fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
-                                if (usesAccessibilityScreenshot) {
+                                if (rootCapture) {
+                                    "Root：请用下方按钮测试授权；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；悬浮窗：${if (voiceOnly) "纯语音无需开启" else if (overlayPermissionGranted) "已开启" else "未开启"}"
+                                } else if (voiceOnly) {
+                                    "音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；截图权限：${if (screenshotPermissionGranted) "已开启" else "未开启"}；悬浮窗：纯语音无需开启"
+                                } else if (usesAccessibilityScreenshot) {
                                     "系统截图与音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}"
                                 } else {
                                     "屏幕捕获：${if (screenshotPermissionGranted) "已授权" else "未授权"}；悬浮窗：${if (overlayPermissionGranted) "已开启" else "未开启"}；音量监听：${if (accessibilityPermissionGranted) "已开启" else "未开启"}；通知：${if (notificationPermissionGranted) "已允许" else "未允许"}"
@@ -1736,7 +1800,7 @@ internal fun SettingsScreen(
                             )
                         }
                     }
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    if (!usesAccessibilityScreenshot) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1747,14 +1811,16 @@ internal fun SettingsScreen(
                             ) {
                                 Text("授权屏幕捕获")
                             }
-                            OutlinedButton(
-                                onClick = onOpenOverlaySettings,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("开启悬浮窗")
+                            if (!voiceOnly) {
+                                OutlinedButton(
+                                    onClick = onOpenOverlaySettings,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("开启悬浮窗")
+                                }
                             }
                         }
-                    } else {
+                    } else if (!voiceOnly) {
                         OutlinedButton(
                             onClick = onOpenOverlaySettings,
                             modifier = Modifier.fillMaxWidth(),

@@ -66,6 +66,8 @@ class VolumeDownAccessibilityService : AccessibilityService() {
                 latestConfig = config
                 enabled = config.backgroundCaptureEnabled
                 trigger = config.screenshotTrigger
+                if (config.screenshotVoiceOnlyEnabled || !enabled) overlayManager.dismiss()
+                if (config.rootScreenshotEnabled) BackgroundScreenshotManager.stop(this@VolumeDownAccessibilityService)
             }
         }
     }
@@ -102,6 +104,25 @@ class VolumeDownAccessibilityService : AccessibilityService() {
     internal fun captureFromTrigger(): Boolean {
         app.container.ttsManager.stop()
         if (!enabled) return false
+        if (latestConfig.rootScreenshotEnabled) {
+            synchronized(captureLock) {
+                if (screenshotPending || captureJob != null) return false
+                screenshotPending = true
+            }
+            overlayManager.dismiss()
+            serviceScope.launch {
+                try {
+                    processScreenshot(RootScreenCapture.capture())
+                } catch (cancelled: CancellationException) {
+                    releaseCaptureReservation()
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    releaseCaptureReservation()
+                    showFeedback(failure.message ?: "Root 截图失败")
+                }
+            }
+            return true
+        }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             synchronized(captureLock) {
                 if (screenshotPending || captureJob != null) return false
@@ -204,22 +225,22 @@ class VolumeDownAccessibilityService : AccessibilityService() {
                 val answer = questionProcessor.process(
                     bitmap = bitmap,
                     prompt = config.screenshotPrompt,
-                    shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+                    shortAnswerModeEnabled = config.shortAnswerModeEnabled && !config.screenshotVoiceOnlyEnabled,
                 )
-                if (config.shortAnswerModeEnabled) {
-                    // Compact mode intentionally has no text bubble. Only a recognized answer
-                    // gets a one-second indicator at the top edge of the screen.
-                    extractShortAnswerIndicator(answer)?.let(overlayManager::showShortAnswer)
-                } else {
-                    showFeedback(answer, config)
-                }
-                if (config.screenshotAssistantEnabled && answer.isNotBlank()) {
-                    app.container.ttsManager.speak("screenshot_${System.currentTimeMillis()}", answer)
-                }
+                val outputConfig = app.container.configStore.read()
+                deliverScreenshotAnswer(
+                    answer, outputConfig,
+                    dismiss = overlayManager::dismiss,
+                    showText = { showFeedback(it, outputConfig) },
+                    showIndicator = { overlayManager.showShortAnswer(it) },
+                    speak = { text, hidden ->
+                        app.container.ttsManager.speak("screenshot_${System.currentTimeMillis()}", text, voiceOnly = hidden)
+                    },
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
-                showFeedback(failure.message ?: "截屏问答失败", config)
+                showFeedback(failure.message ?: "截屏问答失败")
             } finally {
                 coroutineContext[Job]?.let(::clearCaptureJob)
             }
@@ -249,6 +270,11 @@ class VolumeDownAccessibilityService : AccessibilityService() {
 
     private fun showFeedback(message: String, config: ProviderConfig? = null) {
         val appearance = config ?: latestConfig
+        if (appearance.screenshotVoiceOnlyEnabled) {
+            overlayManager.dismiss()
+            app.container.ttsManager.speak("screenshot_feedback", message, voiceOnly = true)
+            return
+        }
         val shown = overlayManager.show(
             answer = message,
             backgroundColor = appearance.overlayBackgroundColor,

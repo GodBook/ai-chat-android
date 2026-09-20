@@ -90,7 +90,7 @@ fun AiChatApp(viewModel: MainViewModel) {
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         val data = result.data
-        if (state.config.backgroundCaptureEnabled && result.resultCode == Activity.RESULT_OK && data != null) {
+        if (state.config.backgroundCaptureEnabled && !state.config.rootScreenshotEnabled && result.resultCode == Activity.RESULT_OK && data != null) {
             BackgroundScreenshotManager.start(context, result.resultCode, data)
         }
     }
@@ -98,8 +98,10 @@ fun AiChatApp(viewModel: MainViewModel) {
     // Re-assert the user-selected service state whenever the activity is recreated or returns
     // from a system permission screen. The switch itself remains the source of truth; there is
     // deliberately no matching automatic stop here.
-    LaunchedEffect(state.config.backgroundCaptureEnabled) {
-        if (state.config.backgroundCaptureEnabled) {
+    LaunchedEffect(state.config.backgroundCaptureEnabled, state.config.rootScreenshotEnabled) {
+        if (state.config.rootScreenshotEnabled) {
+            BackgroundScreenshotManager.stop(context)
+        } else if (state.config.backgroundCaptureEnabled) {
             runCatching { BackgroundScreenshotManager.start(context) }
         }
     }
@@ -356,7 +358,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                             screenshotAssistantEnabled = screenshotAssistantEnabled,
                         ).also { result ->
                             if (result.isSuccess) {
-                                if (backgroundEnabled) {
+                                if (backgroundEnabled && !state.config.rootScreenshotEnabled) {
                                     runCatching { BackgroundScreenshotManager.start(context) }
                                 } else {
                                     BackgroundScreenshotManager.stop(context)
@@ -367,7 +369,7 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onBackgroundCaptureChanged = { enabled ->
                         viewModel.setBackgroundCaptureEnabled(enabled).also { result ->
                             if (result.isSuccess) {
-                                if (enabled) {
+                                if (enabled && !state.config.rootScreenshotEnabled) {
                                     // Start the worker immediately after the preference is
                                     // persisted. The projection grant can then be supplied from
                                     // the permission button without a startup race.
@@ -381,6 +383,8 @@ fun AiChatApp(viewModel: MainViewModel) {
                     onOverlayAppearanceChanged = viewModel::setOverlayAppearance,
                     onShortAnswerModeChanged = viewModel::setShortAnswerModeEnabled,
                     onScreenshotAssistantChanged = viewModel::setScreenshotAssistantEnabled,
+                    onRootScreenshotEnabledChanged = viewModel::setRootScreenshotEnabled,
+                    onScreenshotVoiceOnlyEnabledChanged = viewModel::setScreenshotVoiceOnlyEnabled,
                     onAutoFallbackEnabledChanged = viewModel::setAutoFallbackEnabled,
                     onAutoCollapseThinkingChanged = viewModel::setAutoCollapseThinking,
                     onModelPresetSelected = viewModel::selectModelPreset,

@@ -42,6 +42,8 @@ class ConfigStoreTest {
         assertFalse(config.overlayGlassEnabled)
         assertFalse(config.shortAnswerModeEnabled)
         assertFalse(config.screenshotAssistantEnabled)
+        assertFalse(config.screenshotVoiceOnlyEnabled)
+        assertFalse(config.rootScreenshotEnabled)
         assertEquals(DEFAULT_SCREENSHOT_TRIGGER, config.screenshotTrigger)
     }
 
@@ -84,6 +86,21 @@ class ConfigStoreTest {
         assertEquals("https://api.example.test/v1", config.baseUrl)
         assertEquals("vision-model", config.model)
         assertEquals("保留这条提示词", config.screenshotPrompt)
+    }
+
+    @Test
+    fun capturePrivacyOptionsSurviveFormSaveAndIndependentUpdates() = runBlocking {
+        store.updateScreenshotVoiceOnlyEnabled(true)
+        store.updateRootScreenshotEnabled(true)
+        store.update(baseUrl = "https://example.test/v1", model = "vision", visionEnabled = true)
+        assertTrue(store.read().screenshotVoiceOnlyEnabled)
+        assertTrue(store.read().rootScreenshotEnabled)
+        store.updateRootScreenshotEnabled(false)
+        assertTrue(store.read().screenshotVoiceOnlyEnabled)
+        assertFalse(store.read().rootScreenshotEnabled)
+        store.update(store.read().copy(screenshotVoiceOnlyEnabled = false, rootScreenshotEnabled = true))
+        assertFalse(store.read().screenshotVoiceOnlyEnabled)
+        assertTrue(store.read().rootScreenshotEnabled)
     }
 
     @Test

@@ -1141,6 +1141,15 @@ class MainViewModel(
     }
 
     /** Persists the screenshot assistant switch immediately. */
+    suspend fun setScreenshotVoiceOnlyEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        configStore.updateScreenshotVoiceOnlyEnabled(enabled)
+        if (enabled) ttsManager.hideScreenshotPlayback()
+    }
+
+    suspend fun setRootScreenshotEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        configStore.updateRootScreenshotEnabled(enabled)
+    }
+
     suspend fun setScreenshotAssistantEnabled(enabled: Boolean): Result<Unit> = runCatching {
         val current = configStore.read()
         configStore.update(current.copy(screenshotAssistantEnabled = enabled))

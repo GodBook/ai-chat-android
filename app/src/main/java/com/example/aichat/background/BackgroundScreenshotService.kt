@@ -34,6 +34,7 @@ class BackgroundScreenshotService : Service() {
     private lateinit var questionProcessor: ScreenshotQuestionProcessor
     private var projectionJob: Job? = null
     private var captureJob: Job? = null
+    private var voiceOnly = false
 
     internal val hasProjection: Boolean
         get() = ::captureManager.isInitialized && captureManager.hasProjection
@@ -44,6 +45,16 @@ class BackgroundScreenshotService : Service() {
         captureManager = ScreenCaptureManager(this)
         overlayManager = ScreenshotOverlayManager(this)
         questionProcessor = ScreenshotQuestionProcessor(app)
+        serviceScope.launch {
+            app.container.configStore.config.collect { config ->
+                voiceOnly = config.screenshotVoiceOnlyEnabled
+                if (voiceOnly || !config.backgroundCaptureEnabled) {
+                    overlayManager.dismiss()
+                    getSystemService(NotificationManager::class.java).cancel(ANSWER_NOTIFICATION_ID)
+                }
+                if (config.rootScreenshotEnabled) stopSelf()
+            }
+        }
         createNotificationChannel()
         BackgroundScreenshotManager.attach(this)
     }
@@ -145,27 +156,32 @@ class BackgroundScreenshotService : Service() {
                     notifyStatus("无法读取后台截图设置")
                     return@launch
                 }
-                if (!config.backgroundCaptureEnabled) return@launch
+                if (!config.backgroundCaptureEnabled || config.rootScreenshotEnabled) return@launch
+                voiceOnly = config.screenshotVoiceOnlyEnabled
                 try {
+                    overlayManager.dismiss()
                     val bitmap = captureManager.capture()
                     val answer = questionProcessor.process(
                         bitmap = bitmap,
                         prompt = config.screenshotPrompt,
-                        shortAnswerModeEnabled = config.shortAnswerModeEnabled,
+                        shortAnswerModeEnabled = config.shortAnswerModeEnabled && !config.screenshotVoiceOnlyEnabled,
                     )
-                    val shown = if (config.shortAnswerModeEnabled) {
-                        extractShortAnswerIndicator(answer)?.let(overlayManager::showShortAnswer) ?: true
-                    } else {
-                        overlayManager.show(
-                            answer = answer,
-                            backgroundColor = config.overlayBackgroundColor,
-                            glassEnabled = config.overlayGlassEnabled,
-                        )
-                    }
-                    if (!shown && !config.shortAnswerModeEnabled) notifyStatus(answer)
-                    if (config.screenshotAssistantEnabled && answer.isNotBlank()) {
-                        app.container.ttsManager.speak("screenshot_${System.currentTimeMillis()}", answer)
-                    }
+                    val outputConfig = app.container.configStore.read()
+                    if (!outputConfig.backgroundCaptureEnabled || outputConfig.rootScreenshotEnabled) return@launch
+                    voiceOnly = outputConfig.screenshotVoiceOnlyEnabled
+                    deliverScreenshotAnswer(
+                        answer, outputConfig,
+                        dismiss = overlayManager::dismiss,
+                        showText = { text ->
+                            if (!overlayManager.show(text, outputConfig.overlayBackgroundColor, outputConfig.overlayGlassEnabled)) {
+                                notifyStatus(text)
+                            }
+                        },
+                        showIndicator = { overlayManager.showShortAnswer(it) },
+                        speak = { text, hidden ->
+                            app.container.ttsManager.speak("screenshot_${System.currentTimeMillis()}", text, voiceOnly = hidden)
+                        },
+                    )
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
@@ -189,6 +205,10 @@ class BackgroundScreenshotService : Service() {
     }
 
     private fun notifyStatus(message: String) {
+        if (voiceOnly) {
+            app.container.ttsManager.speak("screenshot_feedback", message, voiceOnly = true)
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED

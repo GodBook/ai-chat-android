@@ -58,6 +58,8 @@ class ConfigStore(context: Context) {
             themeColor = preferences[THEME_COLOR] ?: DEFAULT_THEME_COLOR,
             defaultWebSearchEnabled = preferences[DEFAULT_WEB_SEARCH_ENABLED] ?: false,
             screenshotAssistantEnabled = preferences[SCREENSHOT_ASSISTANT_ENABLED] ?: false,
+            rootScreenshotEnabled = preferences[ROOT_SCREENSHOT_ENABLED] ?: false,
+            screenshotVoiceOnlyEnabled = preferences[SCREENSHOT_VOICE_ONLY_ENABLED] ?: false,
         )
     }
 
@@ -82,6 +84,8 @@ class ConfigStore(context: Context) {
         themeColor: String = DEFAULT_THEME_COLOR,
         defaultWebSearchEnabled: Boolean = false,
         screenshotAssistantEnabled: Boolean = false,
+        rootScreenshotEnabled: Boolean? = null,
+        screenshotVoiceOnlyEnabled: Boolean? = null,
     ) {
         dataStore.edit { preferences ->
             preferences[BASE_URL] = baseUrl.trim()
@@ -98,6 +102,8 @@ class ConfigStore(context: Context) {
             preferences[THEME_COLOR] = themeColor
             preferences[DEFAULT_WEB_SEARCH_ENABLED] = defaultWebSearchEnabled
             preferences[SCREENSHOT_ASSISTANT_ENABLED] = screenshotAssistantEnabled
+            rootScreenshotEnabled?.let { preferences[ROOT_SCREENSHOT_ENABLED] = it }
+            screenshotVoiceOnlyEnabled?.let { preferences[SCREENSHOT_VOICE_ONLY_ENABLED] = it }
         }
     }
 
@@ -116,6 +122,8 @@ class ConfigStore(context: Context) {
         themeColor = config.themeColor,
         defaultWebSearchEnabled = config.defaultWebSearchEnabled,
         screenshotAssistantEnabled = config.screenshotAssistantEnabled,
+        rootScreenshotEnabled = config.rootScreenshotEnabled,
+        screenshotVoiceOnlyEnabled = config.screenshotVoiceOnlyEnabled,
     )
 
     /** Updates default web search enabled immediately. */
@@ -175,11 +183,21 @@ class ConfigStore(context: Context) {
         }
     }
 
+    suspend fun updateScreenshotVoiceOnlyEnabled(enabled: Boolean) {
+        dataStore.edit { it[SCREENSHOT_VOICE_ONLY_ENABLED] = enabled }
+    }
+
+    suspend fun updateRootScreenshotEnabled(enabled: Boolean) {
+        dataStore.edit { it[ROOT_SCREENSHOT_ENABLED] = enabled }
+    }
+
     suspend fun reset() {
         dataStore.edit { it.clear() }
     }
 
     private companion object {
+        val ROOT_SCREENSHOT_ENABLED = booleanPreferencesKey("root_screenshot_enabled")
+        val SCREENSHOT_VOICE_ONLY_ENABLED = booleanPreferencesKey("screenshot_voice_only_enabled")
         val BASE_URL = stringPreferencesKey("base_url")
         val MODEL = stringPreferencesKey("model")
         val VISION_ENABLED = booleanPreferencesKey("vision_enabled")
