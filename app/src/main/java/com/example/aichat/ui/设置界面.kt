@@ -107,6 +107,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.aichat.ui.tts.TtsManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.aichat.BuildConfig
@@ -546,6 +548,8 @@ internal fun SettingsScreen(
     var pendingBackgroundPrevious by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val ttsManager = remember(context) { TtsManager.getInstance(context) }
+    val speechState by ttsManager.playbackState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     var permissionRefresh by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycleOwner) {
@@ -1630,6 +1634,19 @@ internal fun SettingsScreen(
                         )
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            ttsManager.speak("speech_test", "语音测试成功，截图回答将通过媒体音量播放。")
+                        }) { Text("测试语音") }
+                        TextButton(onClick = {
+                            runCatching {
+                                context.startActivity(android.content.Intent("com.android.settings.TTS_SETTINGS"))
+                            }.onFailure { error = "无法打开语音设置，请到系统设置中搜索“文字转语音”" }
+                        }) { Text("系统语音设置") }
+                    }
+                    speechState.errorMessage?.let { message ->
+                        Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
                     ScreenshotTriggerSettings(
                         trigger = screenshotTrigger,
                         enabled = !saving && !updatingScreenshotTrigger,

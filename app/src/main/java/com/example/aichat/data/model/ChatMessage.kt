@@ -84,7 +84,7 @@ enum class ScreenshotTrigger(
     VOLUME_DOWN(
         storageKey = "volume_down",
         label = "音量下键",
-        description = "按一下就截图，操作最快，但调音量时容易误触",
+        description = "按一下就截图，开启后台截图时拦截该键，不会降低媒体音量",
     ),
     VOLUME_UP_DOWN(
         storageKey = "volume_up_down",
